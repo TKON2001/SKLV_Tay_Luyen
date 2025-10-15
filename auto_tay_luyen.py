@@ -641,8 +641,8 @@ class AutoRefineApp:
         except Exception:
             return False
         
-        # Tăng kích thước vùng chụp để bắt được dấu tích rõ hơn
-        box_size = 34
+        # Vùng chụp gọn hơn để giảm nhiễu nền
+        box_size = 28
         half = box_size // 2
         left = max(0, lx - half)
         top = max(0, ly - half)
@@ -664,15 +664,15 @@ class AutoRefineApp:
                 r, g, b = pixels[x, y]
 
                 # Kiểm tra màu vàng: R cao, G cao, B thấp
-                if r > 180 and g > 180 and b < 120:
+                if r > 185 and g > 175 and b < 110:
                     yellow_pixels += 1
                     # Vàng sáng (dấu tích)
-                    if r > 220 and g > 220 and b < 80:
+                    if r > 225 and g > 215 and b < 85:
                         bright_yellow_pixels += 1
 
                 # Kiểm tra theo HSV để bao phủ trường hợp màu vàng đậm/nhạt
                 h, s, v = colorsys.rgb_to_hsv(r / 255.0, g / 255.0, b / 255.0)
-                if 0.11 <= h <= 0.20 and s >= 0.35 and v >= 0.50:
+                if 0.12 <= h <= 0.18 and s >= 0.42 and v >= 0.55:
                     hsv_yellow_pixels += 1
 
         # Tính tỉ lệ pixel vàng
@@ -687,11 +687,10 @@ class AutoRefineApp:
             )
         )
 
-        # Có dấu tích vàng nếu có đủ pixel vàng sáng
+        # Nhận diện dấu tích vàng: yêu cầu chặt chẽ hơn để tránh nhầm nền
         has_checkmark = (
-            bright_yellow_ratio > 0.025
-            or yellow_ratio > 0.10
-            or hsv_yellow_ratio > 0.045
+            (bright_yellow_ratio > 0.018 and yellow_ratio > 0.085)
+            or (yellow_ratio > 0.12 and hsv_yellow_ratio > 0.060)
         )
         
         status = "TÍCH" if has_checkmark else "TRỐNG"
@@ -723,29 +722,30 @@ class AutoRefineApp:
             elif force:
                 self.log(f"   🔁 Force bỏ tích Lock {lock_pos} bất kể trạng thái nhận diện")
 
-            # Thử click với nhiều vị trí khác nhau để tăng độ chính xác
+            # Thử click với vài vị trí lân cận để tăng độ chính xác
             click_positions = [
                 (x, y),           # Vị trí chính xác
                 (x+1, y),         # Lệch phải 1px
-                (x-1, y),         # Lệch trái 1px
                 (x, y+1),         # Lệch xuống 1px
-                (x, y-1),         # Lệch lên 1px
-                (x+2, y+2),       # Lệch chéo
+                (x-1, y-1),       # Lệch chéo
             ]
             
-            for attempt in range(5):  # Tăng số lần thử
-                self.log(f"   Thử bỏ tích lần {attempt + 1}/5...")
+            for attempt in range(3):  # Rút ngắn số lần thử để thao tác nhanh hơn
+                self.log(f"   Thử bỏ tích lần {attempt + 1}/3...")
                 
                 for offset_x, offset_y in click_positions:
                     try:
                         # Click với vị trí offset
                         pyautogui.moveTo(offset_x, offset_y)
-                        time.sleep(0.2) # Chờ trước khi click
+                        time.sleep(0.12) # Chờ trước khi click
                         pyautogui.click(offset_x, offset_y)
-                        time.sleep(0.8)  # Tăng thời gian chờ UI cập nhật
+                        time.sleep(0.35)  # Chờ UI cập nhật
                         
-                        # Kiểm tra kết quả
-                        if not self.is_lock_checked(lock_pos):
+                        # Kiểm tra kết quả (đọc hai lần để chống nhiễu)
+                        unchecked_1 = not self.is_lock_checked(lock_pos)
+                        time.sleep(0.12)
+                        unchecked_2 = not self.is_lock_checked(lock_pos)
+                        if unchecked_1 and unchecked_2:
                             self.log(f"   ✅ Đã bỏ tích thành công Lock {lock_pos}")
                             return True
                             
@@ -754,25 +754,31 @@ class AutoRefineApp:
                         continue
                 
                 # Nếu vẫn chưa bỏ tích được, thử click mạnh hơn
-                if attempt < 4:
-                    time.sleep(0.5)
+                if attempt < 2:
+                    time.sleep(0.25)
                     try:
                         # Double click để chắc chắn
                         pyautogui.doubleClick(x, y)
-                        time.sleep(0.4)
-                        if not self.is_lock_checked(lock_pos):
+                        time.sleep(0.25)
+                        unchecked_1 = not self.is_lock_checked(lock_pos)
+                        time.sleep(0.1)
+                        unchecked_2 = not self.is_lock_checked(lock_pos)
+                        if unchecked_1 and unchecked_2:
                             self.log(f"   ✅ Đã bỏ tích bằng double click Lock {lock_pos}")
                             return True
                     except Exception:
                         pass
             
             # Kiểm tra lần cuối
-            final_check = not self.is_lock_checked(lock_pos)
+            final_check_1 = not self.is_lock_checked(lock_pos)
+            time.sleep(0.12)
+            final_check_2 = not self.is_lock_checked(lock_pos)
+            final_check = final_check_1 and final_check_2
             if final_check:
                 self.log(f"   ✅ Cuối cùng đã bỏ tích Lock {lock_pos}")
                 return True
             else:
-                self.log(f"   ❌ Không thể bỏ tích Lock {lock_pos} sau 5 lần thử")
+                self.log(f"   ❌ Không thể bỏ tích Lock {lock_pos} sau 3 lần thử")
                 return False
 
         except Exception as e:
