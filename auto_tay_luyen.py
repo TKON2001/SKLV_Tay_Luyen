@@ -1101,7 +1101,7 @@ class AutoRefineApp:
                         else:
                             self.log(f"   → Đạt mục tiêu nhưng chưa xác nhận chữ đỏ, bỏ qua")
 
-                # Kiểm tra điều kiện thăng cấp: CHỈ khi đủ 3 dòng MAX trở lên
+                # Kiểm tra điều kiện thăng cấp: CHỈ khi đủ 4 dòng MAX trở lên
                 num_locked = sum(1 for v in self.locked_stats if v)
                 self.log(f"   Số dòng đã khóa: {num_locked}/4")
                 
