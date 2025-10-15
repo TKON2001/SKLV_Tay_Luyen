@@ -467,71 +467,170 @@ class AutoRefineApp:
         ratio = red_count / max(1, total_samples)
         return ratio > 0.06
 
-    def is_upgrade_available(self) -> bool:
-        # Phát hiện nút Thăng Cấp dựa trên màu vàng + badge đỏ
+    def analyze_upgrade_area(self, *, log: bool = True) -> dict | None:
+        """Trả về thống kê màu sắc của vùng Thăng Cấp và vị trí click gợi ý."""
+
         try:
-            if sum(self.config.get("upgrade_area", [0,0,0,0])) == 0:
-                return False
-            
+            if sum(self.config.get("upgrade_area", [0, 0, 0, 0])) == 0:
+                return None
+
             ux, uy, uw, uh = self.config["upgrade_area"]
             shot = pyautogui.screenshot(region=(ux, uy, uw, uh))
             rgb = shot.convert('RGB')
             px = rgb.load()
             width, height = rgb.size
-            
-            # Đếm các loại màu sắc khác nhau
-            golden_pixels = 0     # Màu vàng đậm (nút vàng)
-            bright_gold_pixels = 0 # Màu vàng sáng (nút vàng)
-            red_pixels = 0        # Màu đỏ (badge đỏ)
-            total_pixels = width * height
-            
-            for y in range(height):
-                for x in range(width):
+
+            golden_pixels = 0
+            bright_gold_pixels = 0
+            red_pixels = 0
+            total_pixels = max(1, width * height)
+
+            golden_coords: list[tuple[int, int]] = []
+            step_x = max(1, width // 80)
+            step_y = max(1, height // 60)
+
+            for y in range(0, height, step_y):
+                for x in range(0, width, step_x):
                     r, g, b = px[x, y]
-                    
-                    # Màu vàng đậm (nút Thăng Cấp vàng)
+
                     if r > 180 and g > 160 and b < 120:
                         golden_pixels += 1
-                        # Vàng sáng hơn
                         if r > 200 and g > 180 and b < 100:
                             bright_gold_pixels += 1
-                    
-                    # Màu đỏ sáng (badge đỏ)
+                        golden_coords.append((x, y))
+
                     if r > 200 and r - max(g, b) > 80:
                         red_pixels += 1
-            
-            # Tính tỉ lệ
+
             golden_ratio = golden_pixels / total_pixels
             bright_gold_ratio = bright_gold_pixels / total_pixels
             red_ratio = red_pixels / total_pixels
-            
-            # Debug log chi tiết
-            self.log(f"   DEBUG Upgrade: golden={golden_ratio:.3f}, bright_gold={bright_gold_ratio:.3f}, red={red_ratio:.3f}")
-            
-            # Nút Thăng Cấp active nếu:
-            # 1. Có đủ pixel vàng (nút vàng) HOẶC
-            # 2. Có badge đỏ (thông báo thăng cấp)
+
             has_golden_button = golden_ratio > 0.10 or bright_gold_ratio > 0.05
             has_red_badge = red_ratio > 0.02
-            
             is_active = has_golden_button or has_red_badge
-            
-            # Log chi tiết
-            if is_active:
-                if has_golden_button and has_red_badge:
-                    self.log(f"   ✅ Nút Thăng Cấp: ACTIVE (vàng + badge đỏ)")
-                elif has_golden_button:
-                    self.log(f"   ✅ Nút Thăng Cấp: ACTIVE (nút vàng)")
-                elif has_red_badge:
-                    self.log(f"   ✅ Nút Thăng Cấp: ACTIVE (badge đỏ)")
+
+            hotspot = None
+            if golden_coords:
+                avg_x = sum(x for x, _ in golden_coords) / len(golden_coords)
+                avg_y = sum(y for _, y in golden_coords) / len(golden_coords)
+                hotspot = (int(ux + avg_x), int(uy + avg_y))
             else:
-                self.log(f"   ❌ Nút Thăng Cấp: INACTIVE (golden={golden_ratio:.3f}, red={red_ratio:.3f})")
-            
-            return is_active
-            
+                hotspot = (int(ux + uw // 2), int(uy + uh // 2))
+
+            if log:
+                self.log(
+                    f"   DEBUG Upgrade: golden={golden_ratio:.3f}, bright_gold={bright_gold_ratio:.3f}, red={red_ratio:.3f}"
+                )
+                if is_active:
+                    if has_golden_button and has_red_badge:
+                        self.log("   ✅ Nút Thăng Cấp: ACTIVE (vàng + badge đỏ)")
+                    elif has_golden_button:
+                        self.log("   ✅ Nút Thăng Cấp: ACTIVE (nút vàng)")
+                    else:
+                        self.log("   ✅ Nút Thăng Cấp: ACTIVE (badge đỏ)")
+                else:
+                    self.log(
+                        f"   ❌ Nút Thăng Cấp: INACTIVE (golden={golden_ratio:.3f}, red={red_ratio:.3f})"
+                    )
+
+            return {
+                "active": is_active,
+                "hotspot": hotspot,
+                "has_golden": has_golden_button,
+                "has_red": has_red_badge,
+                "golden_ratio": golden_ratio,
+                "red_ratio": red_ratio,
+            }
+
         except Exception as e:
-            self.log(f"   ❌ Lỗi kiểm tra nút Thăng Cấp: {e}")
+            if log:
+                self.log(f"   ❌ Lỗi kiểm tra nút Thăng Cấp: {e}")
+            return None
+
+    def is_upgrade_available(self) -> bool:
+        info = self.analyze_upgrade_area(log=True)
+        return bool(info and info.get("active"))
+
+    def click_upgrade_button(self) -> tuple[bool, tuple[int, int] | None, str]:
+        """Cố gắng click nút Thăng Cấp. Trả về (success, vị trí, phương thức)."""
+
+        if sum(self.config.get("upgrade_button", [0, 0])) > 0:
+            bx, by = self.config["upgrade_button"]
+            try:
+                pyautogui.moveTo(bx, by)
+                pyautogui.click(bx, by)
+                return True, (bx, by), "preset"
+            except Exception as exc:
+                self.log(f"   ⚠️ Lỗi click nút Thăng Cấp preset: {exc}")
+
+        info = self.analyze_upgrade_area(log=False)
+        if info and info.get("hotspot"):
+            hx, hy = info["hotspot"]
+            try:
+                pyautogui.moveTo(hx, hy)
+                pyautogui.click(hx, hy)
+                method = "hotspot" if info.get("active") else "center"
+                return True, (hx, hy), method
+            except Exception as exc:
+                self.log(f"   ⚠️ Lỗi click hotspot Thăng Cấp: {exc}")
+
+        return False, None, "none"
+
+    def perform_upgrade_sequence(self) -> bool:
+        """Thực hiện chuỗi thao tác thăng cấp và bỏ tích các dòng đã khóa."""
+
+        if sum(self.config.get("upgrade_button", [0, 0])) == 0 and \
+           sum(self.config.get("upgrade_area", [0, 0, 0, 0])) == 0:
+            self.log("⚠️ Chưa cấu hình nút/vùng Thăng Cấp. Không thể thăng cấp tự động.")
             return False
+
+        max_click_attempts = 4
+        for attempt in range(max_click_attempts):
+            if not self.is_running:
+                return False
+
+            self.log(f"▶️ Thử thăng cấp lần {attempt + 1}/{max_click_attempts}...")
+            clicked, pos, method = self.click_upgrade_button()
+
+            if not clicked:
+                self.log("   ⚠️ Không xác định được vị trí nút Thăng Cấp. Sẽ thử lại sau 0.7s.")
+                time.sleep(0.7)
+                continue
+
+            if pos:
+                self.log(f"   ✅ Đã click nút Thăng Cấp tại ({pos[0]}, {pos[1]}) [{method}]")
+
+            time.sleep(1.6)
+
+            settle_checks = 0
+            info = None
+            while settle_checks < 3:
+                info = self.analyze_upgrade_area(log=False)
+                if not info or not info.get("active"):
+                    break
+                settle_checks += 1
+                self.log("   ⏳ Nút vẫn đang sáng, chờ thêm 0.6s để xác nhận...")
+                time.sleep(0.6)
+
+            if settle_checks >= 3 and info and info.get("active"):
+                self.log("   ⚠️ Có vẻ thăng cấp chưa thành công, thử click lại.")
+                time.sleep(0.6)
+                continue
+
+            time.sleep(0.8)
+
+            success_unlock = self.unlock_all_locks(max_attempts=6, force_click=True)
+            if success_unlock:
+                self.locked_stats = [False] * 4
+                self.log("✅ Đã thăng cấp thành công và bỏ tích các dòng!")
+                return True
+
+            self.log("⚠️ Đã thăng cấp nhưng không bỏ tích hết các dòng, sẽ thử lại.")
+            time.sleep(0.8)
+
+        self.log("❌ Thử thăng cấp nhiều lần nhưng chưa thành công hoàn toàn.")
+        return False
 
     def is_lock_checked(self, lock_pos: list[int] | tuple[int, int]) -> bool:
         # Phân tích hình ảnh của ô khóa để xác định trạng thái: tìm dấu tích vàng
@@ -905,7 +1004,7 @@ class AutoRefineApp:
                 
                 if not self.game_window or not self.game_window.isActive:
                     self.log("Cửa sổ game không hoạt động. Tạm dừng.")
-                    time.sleep(2)
+                    time.sleep(1.0)
                     continue
 
                 # Kiểm tra xem có ô nào đang tích không (sau khi thăng cấp)
@@ -921,6 +1020,8 @@ class AutoRefineApp:
                         f"⚠️ Phát hiện {len(leftover_indices)} ô khóa vẫn đang tích - đang bỏ tích lại trước khi tẩy luyện..."
                     )
                     if self.unlock_all_locks(max_attempts=3, force_click=True, target_indices=leftover_indices):
+                        self.log("🔄 Đã bỏ tích các ô còn lại, tiếp tục tẩy luyện sau 0.6s...")
+                        time.sleep(0.6)
                         self.log("🔄 Đã bỏ tích các ô còn lại, tiếp tục tẩy luyện sau 1s...")
                         time.sleep(1.0)
                     else:
@@ -931,7 +1032,7 @@ class AutoRefineApp:
                 # Nhấp nút Tẩy Luyện với delay dài hơn
                 pyautogui.click(self.config["refine_button"])
                 self.log(">> Đã nhấn Tẩy Luyện")
-                time.sleep(3.0) # Chờ UI load hoàn toàn
+                time.sleep(1.6) # Rút ngắn thời gian chờ UI load hoàn toàn
 
                 all_done = True
                 for i, stat in enumerate(self.config["stats"]):
@@ -947,7 +1048,7 @@ class AutoRefineApp:
                     
                     # Chụp và đọc chỉ số với delay để UI ổn định
                     x, y, w, h = stat["area"]
-                    time.sleep(0.5) # Chờ UI ổn định trước khi chụp
+                    time.sleep(0.2) # Chờ UI ổn định trước khi chụp
                     screenshot = pyautogui.screenshot(region=(x, y, w, h))
                     processed_img = self.process_image_for_ocr(screenshot)
                     
@@ -1005,21 +1106,22 @@ class AutoRefineApp:
                 
                 # Thăng cấp khi đủ 3 dòng MAX trở lên
                 if num_locked >= 3:
-                    upgrade_available = self.is_upgrade_available()
-                    
-                    if upgrade_available:
+                    if self.is_upgrade_available():
                         self.log("🎯 Đủ 3 dòng MAX và nút Thăng Cấp active - Bắt đầu thăng cấp!")
                     else:
-                        # Fallback: Thử thăng cấp ngay cả khi không phát hiện nút active
                         self.log("🎯 Đủ 3 dòng MAX - Thử thăng cấp (fallback)...")
-                    
-                    # Đảm bảo cửa sổ game đang active
+
                     try:
                         if self.game_window:
                             self.game_window.activate()
                             time.sleep(0.2)
                     except Exception:
                         pass
+
+                    upgrade_result = self.perform_upgrade_sequence()
+                    if upgrade_result:
+                        self.log("🔄 Tự động tiếp tục tẩy luyện với mục tiêu mới...")
+                        time.sleep(0.6)
                     
                     # Click nút Thăng Cấp 1 lần duy nhất
                     upgrade_clicked = False
@@ -1059,16 +1161,19 @@ class AutoRefineApp:
                             time.sleep(1.0)
                             continue
                     else:
-                        self.log("❌ Không thể click nút Thăng Cấp")
-                
+                        self.log("⏳ Chưa thể hoàn tất thăng cấp, sẽ thử lại sau 1.0s.")
+                        time.sleep(1.0)
+
+                    continue
+
                 elif num_locked < 3:
                     self.log(f"📊 Chưa đủ 3 dòng MAX ({num_locked}/4) - Tiếp tục tẩy luyện...")
-                
+
                 # Nếu không có điều kiện thăng cấp, tiếp tục chu kỳ bình thường
                 if all_done:
                     self.log("ℹ️ Tất cả chỉ số đã được xử lý trong chu kỳ này")
 
-                time.sleep(2.0) # Tăng thời gian nghỉ giữa các chu kỳ
+                time.sleep(1.0) # Rút ngắn thời gian nghỉ giữa các chu kỳ để tăng tốc
             
             except Exception as e:
                 self.log(f"❌ Có lỗi xảy ra: {e}")
