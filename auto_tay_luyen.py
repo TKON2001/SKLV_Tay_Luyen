@@ -1009,27 +1009,8 @@ class AutoRefineApp:
                     time.sleep(1.0)
                     continue
 
-                # Kiểm tra xem có ô nào đang tích không (sau khi thăng cấp)
-                leftover_indices: list[int] = []
-                for idx, stat_cfg in enumerate(self.config["stats"]):
-                    if self.locked_stats[idx]:
-                        continue
-                    if sum(stat_cfg.get("lock_button", [0, 0])) > 0 and self.is_lock_checked(stat_cfg["lock_button"]):
-                        leftover_indices.append(idx)
-
-                if leftover_indices:
-                    self.log(
-                        f"⚠️ Phát hiện {len(leftover_indices)} ô khóa vẫn đang tích - đang bỏ tích lại trước khi tẩy luyện..."
-                    )
-                    if self.unlock_all_locks(max_attempts=3, force_click=True, target_indices=leftover_indices):
-                        self.log("🔄 Đã bỏ tích các ô còn lại, tiếp tục tẩy luyện sau 0.6s...")
-                        time.sleep(0.6)
-                        self.log("🔄 Đã bỏ tích các ô còn lại, tiếp tục tẩy luyện sau 1s...")
-                        time.sleep(1.0)
-                    else:
-                        self.log("❌ Không thể bỏ tích toàn bộ ô khóa, tạm dừng 2s rồi thử lại...")
-                        time.sleep(2.0)
-                    continue
+                # Theo yêu cầu: KHÔNG bỏ tích bất kỳ ô khóa nào trước khi tẩy luyện.
+                # Chỉ thực hiện bỏ tích sau khi thăng cấp thành công.
 
                 # Nhấp nút Tẩy Luyện với delay dài hơn
                 pyautogui.click(self.config["refine_button"])
@@ -1038,9 +1019,13 @@ class AutoRefineApp:
 
                 all_done = True
                 locked_this_cycle = False
+                # Theo dõi dòng đạt MAX trong chu kỳ hiện tại (kể cả đã khóa)
+                max_flags = [False] * len(self.config["stats"])
                 for i, stat in enumerate(self.config["stats"]):
                     if self.locked_stats[i]:
                         self.log(f"   Chỉ số {i+1}: Đã khóa")
+                        # Dòng đã khóa được coi là đang ở trạng thái MAX
+                        max_flags[i] = True
                         continue
                     
                     # Bỏ qua nếu chưa thiết lập
@@ -1103,17 +1088,20 @@ class AutoRefineApp:
                             time.sleep(1.0) # Chờ UI cập nhật sau khi khóa
                         else:
                             self.log(f"   → Đạt mục tiêu nhưng chưa xác nhận chữ đỏ, bỏ qua")
+                        # Ghi nhận đạt MAX trong chu kỳ
+                        max_flags[i] = True
 
-                # Kiểm tra điều kiện thăng cấp: CHỈ khi đủ 4 dòng MAX trở lên
+                # Kiểm tra điều kiện thăng cấp: cần 4 dòng đạt MAX, nhưng chỉ có thể khóa 3 dòng
                 num_locked = sum(1 for v in self.locked_stats if v)
-                self.log(f"   Số dòng đã khóa: {num_locked}/4")
-                
-                # Thăng cấp khi đủ 3 dòng MAX trở lên
-                if num_locked >= 3:
+                total_max = sum(1 for i in range(len(self.config["stats"])) if self.locked_stats[i] or max_flags[i])
+                self.log(f"   Số dòng đã khóa: {num_locked}/4 | Tổng dòng MAX (đã khóa + đạt MAX hiện tại): {total_max}/4")
+
+                # Thăng cấp khi đã khóa >= 3 và tổng cộng 4 dòng đạt MAX
+                if num_locked >= 3 and total_max >= 4:
                     if self.is_upgrade_available():
-                        self.log("🎯 Đủ 3 dòng MAX và nút Thăng Cấp active - Bắt đầu thăng cấp!")
+                        self.log("🎯 Đủ điều kiện: 3 dòng đã khóa + 1 dòng đạt MAX, nút Thăng Cấp active - Bắt đầu thăng cấp!")
                     else:
-                        self.log("🎯 Đủ 3 dòng MAX - Thử thăng cấp (fallback)...")
+                        self.log("🎯 Đủ điều kiện: 3 dòng đã khóa + 1 dòng đạt MAX - Thử thăng cấp (fallback)...")
 
                     try:
                         if self.game_window:
@@ -1168,8 +1156,8 @@ class AutoRefineApp:
 
                     continue
 
-                elif num_locked < 3:
-                    self.log(f"📊 Chưa đủ 3 dòng MAX ({num_locked}/4) - Tiếp tục tẩy luyện...")
+                elif num_locked < 3 or total_max < 4:
+                    self.log(f"📊 Chưa đủ điều kiện thăng cấp (khóa {num_locked}/4, tổng MAX {total_max}/4) - Tiếp tục tẩy luyện...")
 
                 # Nếu không có điều kiện thăng cấp, tiếp tục chu kỳ bình thường
                 if all_done:
