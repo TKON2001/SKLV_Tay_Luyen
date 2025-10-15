@@ -19,6 +19,7 @@ import colorsys
 # Nếu bạn không thêm Tesseract vào PATH khi cài đặt, hãy đảm bảo thiết lập đúng đường dẫn.
 
 _DEFAULT_TESSERACT_PATHS = [
+    r'F:\\Tesseract-OCR\\tesseract.exe',
     r'C:\\Program Files\\Tesseract-OCR\\tesseract.exe',
     r'C:\\Program Files (x86)\\Tesseract-OCR\\tesseract.exe',
 ]
