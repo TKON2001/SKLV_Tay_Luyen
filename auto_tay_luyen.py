@@ -10,28 +10,93 @@ import keyboard
 import json
 import re
 import os
+import shutil
+import sys
 import unicodedata
+import colorsys
 
 # --- CẤU HÌNH QUAN TRỌNG ---
-# Nếu bạn không thêm Tesseract vào PATH khi cài đặt, hãy điền đường dẫn vào đây
-# Ví dụ: pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-try:
-    # Ưu tiên đường dẫn do bạn yêu cầu
-    pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-    pytesseract.get_tesseract_version()
-except pytesseract.TesseractNotFoundError:
+# Nếu bạn không thêm Tesseract vào PATH khi cài đặt, hãy đảm bảo thiết lập đúng đường dẫn.
+
+_DEFAULT_TESSERACT_PATHS = [
+    r'C:\\Program Files\\Tesseract-OCR\\tesseract.exe',
+    r'C:\\Program Files (x86)\\Tesseract-OCR\\tesseract.exe',
+]
+
+
+def _try_show_messagebox(title: str, message: str) -> None:
+    """Hiển thị messagebox an toàn ngay cả khi chưa tạo Tk root."""
+
     try:
-        # Thử đường dẫn phổ biến
-        pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-        pytesseract.get_tesseract_version()
-    except pytesseract.TesseractNotFoundError:
+        tmp_root = tk.Tk()
+        tmp_root.withdraw()
+        messagebox.showerror(title, message)
+        tmp_root.destroy()
+    except Exception:
+        # Nếu môi trường không hỗ trợ GUI (ví dụ chạy test), in ra stderr.
+        print(f"{title}: {message}", file=sys.stderr)
+
+
+def _ensure_tesseract_available() -> bool:
+    """Cố gắng tìm và cấu hình đường dẫn đến Tesseract-OCR."""
+
+    candidates: list[str] = []
+
+    # 1. Ưu tiên các biến môi trường do người dùng chỉ định.
+    for env_key in ("TESSERACT_CMD", "TESSERACT_PATH"):
+        env_path = os.environ.get(env_key)
+        if env_path:
+            candidates.append(env_path)
+
+    # 2. Thử tìm trong PATH hiện tại.
+    detected_in_path = shutil.which("tesseract")
+    if detected_in_path:
+        candidates.append(detected_in_path)
+
+    # 3. Thêm các đường dẫn mặc định phổ biến trên Windows.
+    candidates.extend(_DEFAULT_TESSERACT_PATHS)
+
+    checked_paths: list[str] = []
+
+    for path in candidates:
+        normalized = os.path.normpath(os.path.expandvars(path))
+        if not normalized:
+            continue
+        if not os.path.exists(normalized):
+            checked_paths.append(normalized)
+            continue
+
+        pytesseract.pytesseract.tesseract_cmd = normalized
         try:
-            # Thử đường dẫn khác
-            pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files (x86)\Tesseract-OCR\tesseract.exe'
             pytesseract.get_tesseract_version()
+            return True
         except pytesseract.TesseractNotFoundError:
-            messagebox.showerror("Lỗi", "Không tìm thấy Tesseract-OCR. Vui lòng cài đặt và cấu hình đường dẫn trong code.")
-            exit()
+            checked_paths.append(normalized)
+        except Exception:
+            checked_paths.append(normalized)
+
+    # Cuối cùng thử phiên bản mặc định (nếu người dùng đã cấu hình trước đó).
+    try:
+        pytesseract.get_tesseract_version()
+        return True
+    except pytesseract.TesseractNotFoundError:
+        pass
+
+    # Ghi log debug nếu cần.
+    if checked_paths:
+        print("Đã kiểm tra các đường dẫn Tesseract nhưng không hợp lệ:", file=sys.stderr)
+        for path in checked_paths:
+            print(f"  - {path}", file=sys.stderr)
+
+    return False
+
+
+if not _ensure_tesseract_available():
+    _try_show_messagebox(
+        "Lỗi",
+        "Không tìm thấy Tesseract-OCR. Vui lòng cài đặt và thêm vào PATH hoặc đặt biến môi trường TESSERACT_CMD.",
+    )
+    sys.exit(1)
 
 # --- Lớp ứng dụng chính ---
 class AutoRefineApp:
@@ -476,50 +541,69 @@ class AutoRefineApp:
             return False
         
         # Tăng kích thước vùng chụp để bắt được dấu tích rõ hơn
-        box_size = 30
+        box_size = 34
         half = box_size // 2
         left = max(0, lx - half)
         top = max(0, ly - half)
         snap = pyautogui.screenshot(region=(left, top, box_size, box_size))
-        
+
         # Chuyển sang RGB để phân tích màu sắc
         rgb_img = snap.convert('RGB')
         width, height = rgb_img.size
         pixels = rgb_img.load()
-        
+
         # Đếm pixel vàng (dấu tích)
         yellow_pixels = 0
         bright_yellow_pixels = 0
+        hsv_yellow_pixels = 0
         total_pixels = width * height
-        
+
         for y in range(height):
             for x in range(width):
                 r, g, b = pixels[x, y]
-                
+
                 # Kiểm tra màu vàng: R cao, G cao, B thấp
                 if r > 180 and g > 180 and b < 120:
                     yellow_pixels += 1
                     # Vàng sáng (dấu tích)
                     if r > 220 and g > 220 and b < 80:
                         bright_yellow_pixels += 1
-        
+
+                # Kiểm tra theo HSV để bao phủ trường hợp màu vàng đậm/nhạt
+                h, s, v = colorsys.rgb_to_hsv(r / 255.0, g / 255.0, b / 255.0)
+                if 0.11 <= h <= 0.20 and s >= 0.35 and v >= 0.50:
+                    hsv_yellow_pixels += 1
+
         # Tính tỉ lệ pixel vàng
         yellow_ratio = yellow_pixels / total_pixels
         bright_yellow_ratio = bright_yellow_pixels / total_pixels
-        
+        hsv_yellow_ratio = hsv_yellow_pixels / total_pixels
+
         # Debug log để kiểm tra
-        self.log(f"   DEBUG Lock {lock_pos}: yellow_ratio={yellow_ratio:.3f}, bright_yellow_ratio={bright_yellow_ratio:.3f}")
-        
+        self.log(
+            "   DEBUG Lock {}: yellow_ratio={:.3f}, bright_yellow_ratio={:.3f}, hsv_yellow_ratio={:.3f}".format(
+                lock_pos, yellow_ratio, bright_yellow_ratio, hsv_yellow_ratio
+            )
+        )
+
         # Có dấu tích vàng nếu có đủ pixel vàng sáng
-        has_checkmark = bright_yellow_ratio > 0.05 or yellow_ratio > 0.15
+        has_checkmark = (
+            bright_yellow_ratio > 0.025
+            or yellow_ratio > 0.10
+            or hsv_yellow_ratio > 0.045
+        )
         
         status = "TÍCH" if has_checkmark else "TRỐNG"
         self.log(f"   Kết quả Lock {lock_pos}: {status}")
         
         return has_checkmark
 
-    def ensure_unchecked(self, lock_pos: list[int] | tuple[int, int]) -> bool:
-        # Bảo đảm ô khóa ở trạng thái bỏ tích với retry mechanism mạnh mẽ
+    def ensure_unchecked(self, lock_pos: list[int] | tuple[int, int], *, force: bool = False) -> bool:
+        """Đảm bảo ô khóa được bỏ tích.
+
+        Khi ``force`` được bật, hàm sẽ cố gắng click bỏ tích ngay cả khi hệ thống
+        nhận diện rằng ô đã bỏ tích (dùng cho trường hợp nhận diện bị sai màu).
+        """
         try:
             # Đảm bảo cửa sổ game đang active để click có tác dụng
             try:
@@ -530,12 +614,14 @@ class AutoRefineApp:
                 pass
 
             x, y = int(lock_pos[0]), int(lock_pos[1])
-            
+
             # Kiểm tra trạng thái ban đầu
-            if not self.is_lock_checked(lock_pos):
+            if not force and not self.is_lock_checked(lock_pos):
                 self.log(f"   ✅ Lock {lock_pos} đã ở trạng thái bỏ tích")
                 return True
-            
+            elif force:
+                self.log(f"   🔁 Force bỏ tích Lock {lock_pos} bất kể trạng thái nhận diện")
+
             # Thử click với nhiều vị trí khác nhau để tăng độ chính xác
             click_positions = [
                 (x, y),           # Vị trí chính xác
@@ -587,10 +673,73 @@ class AutoRefineApp:
             else:
                 self.log(f"   ❌ Không thể bỏ tích Lock {lock_pos} sau 5 lần thử")
                 return False
-                
+
         except Exception as e:
             self.log(f"   ❌ Lỗi trong ensure_unchecked: {e}")
             return False
+
+    def unlock_all_locks(
+        self,
+        max_attempts: int = 5,
+        *,
+        force_click: bool = False,
+        target_indices: list[int] | None = None,
+    ) -> bool:
+        """Bỏ tích các ô khóa được chỉ định.
+
+        ``force_click`` cho phép bỏ qua nhận diện ban đầu và click bắt buộc để
+        xử lý các trường hợp OCR màu bị sai. ``target_indices`` cho phép giới
+        hạn danh sách chỉ số cần thao tác (mặc định là tất cả các chỉ số có cấu
+        hình nút khóa).
+        """
+
+        if target_indices is None:
+            indices = list(range(len(self.config["stats"])))
+        else:
+            indices = [idx for idx in target_indices if 0 <= idx < len(self.config["stats"])]
+
+        pending: list[tuple[int, list[int] | tuple[int, int]]] = []
+
+        for idx in indices:
+            stat_cfg = self.config["stats"][idx]
+            lock_pos = stat_cfg.get("lock_button", [0, 0])
+            if sum(lock_pos) == 0:
+                continue
+
+            if force_click:
+                pending.append((idx, lock_pos))
+            else:
+                if self.is_lock_checked(lock_pos):
+                    pending.append((idx, lock_pos))
+
+        if not pending:
+            # Không có ô nào cần bỏ tích
+            return True
+
+        self.log("🔄 Đang bỏ tích các ô khóa...")
+
+        for attempt in range(max_attempts):
+            self.log(f"   Lần thử bỏ tích: {attempt + 1}/{max_attempts}")
+            next_pending: list[tuple[int, list[int] | tuple[int, int]]] = []
+
+            for idx, lock_pos in pending:
+                if self.ensure_unchecked(lock_pos, force=force_click):
+                    self.locked_stats[idx] = False
+                else:
+                    next_pending.append((idx, lock_pos))
+
+            if not next_pending:
+                self.log("✅ Đã bỏ tích thành công các dòng!")
+                return True
+
+            if attempt < max_attempts - 1:
+                self.log(f"   ↻ Còn {len(next_pending)} dòng chưa bỏ tích, thử lại sau 0.6s...")
+                time.sleep(0.6)
+
+            pending = next_pending
+
+        self.log("⚠️ Không thể bỏ tích hết các dòng sau nhiều lần thử.")
+        return False
 
     def normalize_vi(self, s: str) -> str:
         # Bỏ dấu tiếng Việt để so khớp văn bản đơn giản
@@ -760,18 +909,24 @@ class AutoRefineApp:
                     continue
 
                 # Kiểm tra xem có ô nào đang tích không (sau khi thăng cấp)
-                any_locked = False
+                leftover_indices: list[int] = []
                 for idx, stat_cfg in enumerate(self.config["stats"]):
-                    if sum(stat_cfg.get("lock_button", [0,0])) > 0:
-                        if self.is_lock_checked(stat_cfg["lock_button"]):
-                            any_locked = True
-                            self.log(f"   ⚠️ Phát hiện chỉ số {idx+1} vẫn đang tích - Bỏ tích trước khi tẩy luyện...")
-                            self.ensure_unchecked(stat_cfg["lock_button"])
-                            self.locked_stats[idx] = False
-                
-                if any_locked:
-                    self.log("🔄 Đã bỏ tích các ô còn lại, tiếp tục tẩy luyện...")
-                    time.sleep(1.0)
+                    if self.locked_stats[idx]:
+                        continue
+                    if sum(stat_cfg.get("lock_button", [0, 0])) > 0 and self.is_lock_checked(stat_cfg["lock_button"]):
+                        leftover_indices.append(idx)
+
+                if leftover_indices:
+                    self.log(
+                        f"⚠️ Phát hiện {len(leftover_indices)} ô khóa vẫn đang tích - đang bỏ tích lại trước khi tẩy luyện..."
+                    )
+                    if self.unlock_all_locks(max_attempts=3, force_click=True, target_indices=leftover_indices):
+                        self.log("🔄 Đã bỏ tích các ô còn lại, tiếp tục tẩy luyện sau 1s...")
+                        time.sleep(1.0)
+                    else:
+                        self.log("❌ Không thể bỏ tích toàn bộ ô khóa, tạm dừng 2s rồi thử lại...")
+                        time.sleep(2.0)
+                    continue
 
                 # Nhấp nút Tẩy Luyện với delay dài hơn
                 pyautogui.click(self.config["refine_button"])
@@ -885,56 +1040,22 @@ class AutoRefineApp:
                     if upgrade_clicked:
                         # Chờ animation thăng cấp hoàn thành
                         time.sleep(4.0) # Tăng thời gian chờ animation
-                        
-                        # BẮT BUỘC bỏ tích TẤT CẢ 4 ô khóa - LẶP NHIỀU LẦN CHO CHẮC CHẮN
-                        self.log("🔄 Đang bỏ tích tất cả các ô khóa sau khi thăng cấp...")
-                        max_attempts = 5
-                        success_count = 0
-                        
-                        for attempt in range(max_attempts):
-                            self.log(f"   Lần thử bỏ tích: {attempt + 1}/{max_attempts}")
-                            current_success = 0
-                            
-                            for idx, stat_cfg in enumerate(self.config["stats"]):
-                                if sum(stat_cfg.get("lock_button", [0,0])) > 0:
-                                    lock_pos = stat_cfg["lock_button"]
-                                    
-                                    # Kiểm tra trạng thái hiện tại
-                                    if self.is_lock_checked(lock_pos):
-                                        self.log(f"   Chỉ số {idx+1} vẫn đang tích, đang bỏ tích...")
-                                        
-                                        # Thử bỏ tích với nhiều cách
-                                        if self.ensure_unchecked(lock_pos):
-                                            current_success += 1
-                                            self.log(f"   ✅ Đã bỏ tích chỉ số {idx+1}")
-                                        else:
-                                            self.log(f"   ❌ Không thể bỏ tích chỉ số {idx+1}")
-                                    else:
-                                        current_success += 1
-                                        self.log(f"   ✅ Chỉ số {idx+1} đã bỏ tích")
-                            
-                            success_count = current_success
-                            
-                            # Nếu đã bỏ tích được tất cả, thoát khỏi vòng lặp
-                            if success_count >= 3:
-                                self.log("✅ Đã bỏ tích thành công các dòng!")
-                                break
-                            else:
-                                self.log(f"   Chỉ bỏ tích được {success_count}/4 dòng, thử lại...")
-                                time.sleep(0.5)
-                        
-                        # Reset trạng thái khóa trong logic
+
+                        success_unlock = self.unlock_all_locks(max_attempts=6, force_click=True)
                         self.locked_stats = [False] * 4
-                        
-                        if success_count >= 3:
+
+                        if success_unlock:
                             self.log("✅ Đã thăng cấp thành công và bỏ tích các dòng!")
                             self.log("🔄 Tự động tiếp tục tẩy luyện với mục tiêu mới...")
                             self.log("💡 Tool sẽ tự động tẩy luyện liên tục cho đến khi bạn dừng thủ công.")
                             time.sleep(1.0)
                             continue
                         else:
-                            self.log(f"⚠️ Chỉ bỏ tích được {success_count}/4 dòng sau {max_attempts} lần thử")
-                            self.log("🔄 Vẫn tiếp tục tẩy luyện với mục tiêu hiện tại...")
+                            self.log(
+                                "⚠️ Không thể xác nhận bỏ tích hết các dòng sau thăng cấp. Tránh tẩy luyện sai nên tool sẽ dừng để bạn kiểm tra lại."
+                            )
+                            self.is_running = False
+                            self.root.after(0, self._update_button_states)
                             time.sleep(1.0)
                             continue
                     else:
