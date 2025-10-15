@@ -1428,11 +1428,18 @@ class AutoRefineApp:
         if tpl_norm is None:
             return -1.0
         try:
-            gray = img.convert('L').resize((24, 24), Image.LANCZOS)
+            # So khớp trung tâm để tránh viền
+            gray_full = img.convert('L').resize((24, 24), Image.LANCZOS)
+            gray = gray_full.crop((3, 3, 21, 21))  # 18x18
             if np is None:
                 # Fallback: negative MSE (để so sánh tương đối)
                 garr = list(gray.getdata())
-                tarr = list(Image.fromarray((tpl_norm*32+128).clip(0,255).astype('uint8')) if isinstance(tpl_norm, np.ndarray) else tpl_norm.getdata())
+                if isinstance(tpl_norm, np.ndarray):
+                    timg = Image.fromarray((tpl_norm*32+128).clip(0,255).astype('uint8'))
+                else:
+                    timg = tpl_norm
+                timg = timg if timg.size == (18, 18) else timg.resize((18, 18), Image.LANCZOS)
+                tarr = list(timg.getdata())
                 n = min(len(garr), len(tarr))
                 if n == 0:
                     return -1.0
@@ -1441,8 +1448,16 @@ class AutoRefineApp:
             g = np.asarray(gray, dtype=np.float32)
             gm = g.mean(); gs = g.std() if g.std() > 1e-5 else 1.0
             g = (g - gm) / gs
-            num = float((g * tpl_norm).sum())
-            den = float(math.sqrt((g*g).sum()) * math.sqrt((tpl_norm*tpl_norm).sum()))
+            tpl = tpl_norm
+            if isinstance(tpl_norm, np.ndarray):
+                tpl = tpl_norm
+            else:
+                tpl_img = tpl_norm if tpl_norm.size == (18, 18) else tpl_norm.resize((18, 18), Image.LANCZOS)
+                tpl = np.asarray(tpl_img, dtype=np.float32)
+                tm = tpl.mean(); ts = tpl.std() if tpl.std() > 1e-5 else 1.0
+                tpl = (tpl - tm) / ts
+            num = float((g * tpl).sum())
+            den = float(math.sqrt((g*g).sum()) * math.sqrt((tpl*tpl).sum()))
             if den < 1e-6:
                 return -1.0
             return num / den
@@ -1458,10 +1473,10 @@ class AutoRefineApp:
                 return None
             sim_checked = self._template_similarity(snap, self._tpl_checked)
             sim_unchecked = self._template_similarity(snap, self._tpl_unchecked)
-            # Quyết định ngưỡng
-            if sim_unchecked >= 0.65 and (sim_unchecked - max(-1.0, sim_checked)) >= 0.10:
+            # Ngưỡng nới lỏng, dựa trên chênh lệch
+            if sim_unchecked >= 0.60 and (sim_unchecked - max(-1.0, sim_checked)) >= 0.08:
                 return True
-            if sim_checked >= 0.65 and (sim_checked - max(-1.0, sim_unchecked)) >= 0.10:
+            if sim_checked >= 0.60 and (sim_checked - max(-1.0, sim_unchecked)) >= 0.08:
                 return False
             return None
         except Exception:
@@ -1472,6 +1487,7 @@ class AutoRefineApp:
         False nếu có ít nhất một ô khớp 'đã tích'. None nếu không đủ mẫu để kết luận.
         """
         results: list[bool | None] = []
+        diffs: list[float] = []
         for stat_cfg in self.config.get("stats", []):
             lock_pos = stat_cfg.get("lock_button", [0, 0])
             if sum(lock_pos) == 0:
@@ -1482,7 +1498,15 @@ class AutoRefineApp:
             left = max(0, lx - half)
             top = max(0, ly - half)
             snap = pyautogui.screenshot(region=(left, top, box, box))
-            res = self._is_unchecked_by_template(snap)
+            # Tính luôn chênh lệch để dùng khi không chắc chắn
+            sim_c = self._template_similarity(snap, self._tpl_checked)
+            sim_u = self._template_similarity(snap, self._tpl_unchecked)
+            diffs.append(sim_u - sim_c)
+            res = None
+            try:
+                res = self._is_unchecked_by_template(snap)
+            except Exception:
+                res = None
             results.append(res)
 
         if not results:
@@ -1490,6 +1514,13 @@ class AutoRefineApp:
         if any(r is False for r in results):
             return False
         if all(r is True for r in results):
+            return True
+        # Chấp nhận nếu >= 3 ô là True và các ô còn lại có chênh lệch nghiêng về unchecked
+        true_count = sum(1 for r in results if r is True)
+        if true_count >= 3 and sum(1 for d in diffs if d >= 0.06) >= 3:
+            return True
+        # Nếu trung bình chênh lệch rõ rệt về unchecked, cũng coi là True
+        if len(diffs) >= 3 and (sum(diffs)/max(1, len(diffs))) >= 0.09:
             return True
         return None
 
