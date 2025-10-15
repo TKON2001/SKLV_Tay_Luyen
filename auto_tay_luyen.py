@@ -13,6 +13,7 @@ import os
 import shutil
 import sys
 import unicodedata
+import colorsys
 
 # --- CẤU HÌNH QUAN TRỌNG ---
 # Nếu bạn không thêm Tesseract vào PATH khi cài đặt, hãy đảm bảo thiết lập đúng đường dẫn.
@@ -540,42 +541,57 @@ class AutoRefineApp:
             return False
         
         # Tăng kích thước vùng chụp để bắt được dấu tích rõ hơn
-        box_size = 30
+        box_size = 34
         half = box_size // 2
         left = max(0, lx - half)
         top = max(0, ly - half)
         snap = pyautogui.screenshot(region=(left, top, box_size, box_size))
-        
+
         # Chuyển sang RGB để phân tích màu sắc
         rgb_img = snap.convert('RGB')
         width, height = rgb_img.size
         pixels = rgb_img.load()
-        
+
         # Đếm pixel vàng (dấu tích)
         yellow_pixels = 0
         bright_yellow_pixels = 0
+        hsv_yellow_pixels = 0
         total_pixels = width * height
-        
+
         for y in range(height):
             for x in range(width):
                 r, g, b = pixels[x, y]
-                
+
                 # Kiểm tra màu vàng: R cao, G cao, B thấp
                 if r > 180 and g > 180 and b < 120:
                     yellow_pixels += 1
                     # Vàng sáng (dấu tích)
                     if r > 220 and g > 220 and b < 80:
                         bright_yellow_pixels += 1
-        
+
+                # Kiểm tra theo HSV để bao phủ trường hợp màu vàng đậm/nhạt
+                h, s, v = colorsys.rgb_to_hsv(r / 255.0, g / 255.0, b / 255.0)
+                if 0.11 <= h <= 0.20 and s >= 0.35 and v >= 0.50:
+                    hsv_yellow_pixels += 1
+
         # Tính tỉ lệ pixel vàng
         yellow_ratio = yellow_pixels / total_pixels
         bright_yellow_ratio = bright_yellow_pixels / total_pixels
-        
+        hsv_yellow_ratio = hsv_yellow_pixels / total_pixels
+
         # Debug log để kiểm tra
-        self.log(f"   DEBUG Lock {lock_pos}: yellow_ratio={yellow_ratio:.3f}, bright_yellow_ratio={bright_yellow_ratio:.3f}")
-        
+        self.log(
+            "   DEBUG Lock {}: yellow_ratio={:.3f}, bright_yellow_ratio={:.3f}, hsv_yellow_ratio={:.3f}".format(
+                lock_pos, yellow_ratio, bright_yellow_ratio, hsv_yellow_ratio
+            )
+        )
+
         # Có dấu tích vàng nếu có đủ pixel vàng sáng
-        has_checkmark = bright_yellow_ratio > 0.05 or yellow_ratio > 0.15
+        has_checkmark = (
+            bright_yellow_ratio > 0.025
+            or yellow_ratio > 0.10
+            or hsv_yellow_ratio > 0.045
+        )
         
         status = "TÍCH" if has_checkmark else "TRỐNG"
         self.log(f"   Kết quả Lock {lock_pos}: {status}")
@@ -1036,9 +1052,10 @@ class AutoRefineApp:
                             continue
                         else:
                             self.log(
-                                "⚠️ Không thể xác nhận bỏ tích hết các dòng sau thăng cấp. Vẫn tiếp tục tẩy luyện với mục tiêu hi"
-                                "ện tại..."
+                                "⚠️ Không thể xác nhận bỏ tích hết các dòng sau thăng cấp. Tránh tẩy luyện sai nên tool sẽ dừng để bạn kiểm tra lại."
                             )
+                            self.is_running = False
+                            self.root.after(0, self._update_button_states)
                             time.sleep(1.0)
                             continue
                     else:
