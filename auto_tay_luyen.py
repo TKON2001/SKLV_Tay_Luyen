@@ -1030,7 +1030,7 @@ class AutoRefineApp:
                 # Nhấp nút Tẩy Luyện với delay dài hơn
                 pyautogui.click(self.config["refine_button"])
                 self.log(">> Đã nhấn Tẩy Luyện")
-                time.sleep(2.0) # Rút ngắn thời gian chờ UI load hoàn toàn
+                time.sleep(1.6) # Rút ngắn thời gian chờ UI load hoàn toàn
 
                 all_done = True
                 for i, stat in enumerate(self.config["stats"]):
@@ -1046,7 +1046,7 @@ class AutoRefineApp:
                     
                     # Chụp và đọc chỉ số với delay để UI ổn định
                     x, y, w, h = stat["area"]
-                    time.sleep(0.3) # Chờ UI ổn định trước khi chụp
+                    time.sleep(0.2) # Chờ UI ổn định trước khi chụp
                     screenshot = pyautogui.screenshot(region=(x, y, w, h))
                     processed_img = self.process_image_for_ocr(screenshot)
                     
@@ -1119,10 +1119,10 @@ class AutoRefineApp:
                     upgrade_result = self.perform_upgrade_sequence()
                     if upgrade_result:
                         self.log("🔄 Tự động tiếp tục tẩy luyện với mục tiêu mới...")
-                        time.sleep(0.8)
+                        time.sleep(0.6)
                     else:
-                        self.log("⏳ Chưa thể hoàn tất thăng cấp, sẽ thử lại sau 1.2s.")
-                        time.sleep(1.2)
+                        self.log("⏳ Chưa thể hoàn tất thăng cấp, sẽ thử lại sau 1.0s.")
+                        time.sleep(1.0)
 
                     continue
 
@@ -1133,7 +1133,7 @@ class AutoRefineApp:
                 if all_done:
                     self.log("ℹ️ Tất cả chỉ số đã được xử lý trong chu kỳ này")
 
-                time.sleep(1.2) # Rút ngắn thời gian nghỉ giữa các chu kỳ để tăng tốc
+                time.sleep(1.0) # Rút ngắn thời gian nghỉ giữa các chu kỳ để tăng tốc
             
             except Exception as e:
                 self.log(f"❌ Có lỗi xảy ra: {e}")
