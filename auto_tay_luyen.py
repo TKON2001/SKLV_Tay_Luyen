@@ -14,6 +14,11 @@ import shutil
 import sys
 import unicodedata
 import colorsys
+import math
+try:
+    import numpy as np
+except Exception:
+    np = None
 
 # --- CẤU HÌNH QUAN TRỌNG ---
 # Nếu bạn không thêm Tesseract vào PATH khi cài đặt, hãy đảm bảo thiết lập đúng đường dẫn.
@@ -120,17 +125,28 @@ class AutoRefineApp:
             ],
             "upgrade_area": [0, 0, 0, 0],
             "upgrade_button": [0, 0],
-            "require_red": False
+            "require_red": False,
+            "lock_templates": {
+                "checked": "lock_checked.png",
+                "unchecked": "lock_unchecked.png"
+            }
         }
         self.locked_stats = [False] * 4
         self.pending_upgrade = False
         self.config_file = "config_tay_luyen.json"
         self.require_red_var = tk.BooleanVar(value=False)
+        self._tpl_checked = None
+        self._tpl_unchecked = None
 
         # --- Tạo giao diện ---
         self.create_widgets()
         self.load_config()
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        # Tải template nếu có
+        try:
+            self._load_lock_templates()
+        except Exception as _e:
+            self.log(f"⚠️ Không thể tải template lock: {_e}")
 
     def create_widgets(self):
         # Tạo scrollable frame
@@ -647,6 +663,23 @@ class AutoRefineApp:
         left = max(0, lx - half)
         top = max(0, ly - half)
         snap = pyautogui.screenshot(region=(left, top, box_size, box_size))
+
+        # Nếu có template, ưu tiên so khớp mẫu
+        try:
+            if self._tpl_checked is not None or self._tpl_unchecked is not None:
+                sim_checked = self._template_similarity(snap, self._tpl_checked)
+                sim_unchecked = self._template_similarity(snap, self._tpl_unchecked)
+                # Ngưỡng quyết định bằng similarity
+                # checked ~0.65 trở lên và chênh lệch > 0.10 so với unchecked
+                if sim_checked >= 0.65 and (sim_checked - max(-1.0, sim_unchecked)) >= 0.10:
+                    self.log(f"   TEMPLATE Lock {lock_pos}: sim_checked={sim_checked:.3f}, sim_unchecked={sim_unchecked:.3f} => TÍCH")
+                    return True
+                if sim_unchecked >= 0.65 and (sim_unchecked - max(-1.0, sim_checked)) >= 0.10:
+                    self.log(f"   TEMPLATE Lock {lock_pos}: sim_checked={sim_checked:.3f}, sim_unchecked={sim_unchecked:.3f} => TRỐNG")
+                    return False
+                # Nếu mơ hồ, fallback sang phân tích màu
+        except Exception:
+            pass
 
         # Chuyển sang RGB để phân tích màu sắc
         rgb_img = snap.convert('RGB')
@@ -1290,6 +1323,56 @@ class AutoRefineApp:
                 self.log("ℹ️ Không tìm thấy file cấu hình, sử dụng mặc định.")
         except Exception as e:
             self.log(f"❌ Lỗi khi tải cấu hình: {e}")
+
+    # === Nhận diện mẫu ô khóa ===
+    def _load_lock_templates(self) -> None:
+        paths = self.config.get("lock_templates", {})
+        checked_path = paths.get("checked")
+        unchecked_path = paths.get("unchecked")
+        def _load_one(p):
+            if not p:
+                return None
+            if not os.path.isabs(p):
+                p = os.path.join(os.getcwd(), p)
+            if not os.path.exists(p):
+                return None
+            img = Image.open(p).convert('L').resize((24, 24), Image.LANCZOS)
+            if np is None:
+                return img
+            arr = np.asarray(img, dtype=np.float32)
+            m = arr.mean()
+            s = arr.std() if arr.std() > 1e-5 else 1.0
+            arr = (arr - m) / s
+            return arr
+        self._tpl_checked = _load_one(checked_path)
+        self._tpl_unchecked = _load_one(unchecked_path)
+        if self._tpl_checked is not None or self._tpl_unchecked is not None:
+            self.log("🔎 Đã tải template nhận diện ô khóa.")
+
+    def _template_similarity(self, img: Image.Image, tpl_norm) -> float:
+        if tpl_norm is None:
+            return -1.0
+        try:
+            gray = img.convert('L').resize((24, 24), Image.LANCZOS)
+            if np is None:
+                # Fallback: negative MSE (để so sánh tương đối)
+                garr = list(gray.getdata())
+                tarr = list(Image.fromarray((tpl_norm*32+128).clip(0,255).astype('uint8')) if isinstance(tpl_norm, np.ndarray) else tpl_norm.getdata())
+                n = min(len(garr), len(tarr))
+                if n == 0:
+                    return -1.0
+                mse = sum((garr[i]-tarr[i])**2 for i in range(n))/n
+                return -mse
+            g = np.asarray(gray, dtype=np.float32)
+            gm = g.mean(); gs = g.std() if g.std() > 1e-5 else 1.0
+            g = (g - gm) / gs
+            num = float((g * tpl_norm).sum())
+            den = float(math.sqrt((g*g).sum()) * math.sqrt((tpl_norm*tpl_norm).sum()))
+            if den < 1e-6:
+                return -1.0
+            return num / den
+        except Exception:
+            return -1.0
 
 
 if __name__ == "__main__":
