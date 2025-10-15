@@ -587,12 +587,6 @@ class AutoRefineApp:
             self.log("⚠️ Chưa cấu hình nút/vùng Thăng Cấp. Không thể thăng cấp tự động.")
             return False
 
-        area_configured = sum(self.config.get("upgrade_area", [0, 0, 0, 0])) > 0
-        initial_info = self.analyze_upgrade_area(log=False) if area_configured else None
-        if area_configured and (not initial_info or not initial_info.get("active")):
-            self.log("⚠️ Nút Thăng Cấp chưa sáng, chờ thêm trước khi thăng cấp.")
-            return False
-
         max_click_attempts = 4
         for attempt in range(max_click_attempts):
             if not self.is_running:
@@ -611,34 +605,26 @@ class AutoRefineApp:
 
             time.sleep(1.6)
 
-            upgrade_confirmed = False
-            if area_configured:
-                settle_checks = 0
-                while settle_checks < 3:
-                    info = self.analyze_upgrade_area(log=False)
-                    if not info or not info.get("active"):
-                        upgrade_confirmed = True
-                        break
-                    settle_checks += 1
-                    self.log("   ⏳ Nút vẫn đang sáng, chờ thêm 0.6s để xác nhận...")
-                    time.sleep(0.6)
+            settle_checks = 0
+            info = None
+            while settle_checks < 3:
+                info = self.analyze_upgrade_area(log=False)
+                if not info or not info.get("active"):
+                    break
+                settle_checks += 1
+                self.log("   ⏳ Nút vẫn đang sáng, chờ thêm 0.6s để xác nhận...")
+                time.sleep(0.6)
 
-                if not upgrade_confirmed:
-                    self.log("   ⚠️ Có vẻ thăng cấp chưa thành công, thử click lại.")
-                    time.sleep(0.6)
-                    continue
-            else:
-                upgrade_confirmed = True
+            if settle_checks >= 3 and info and info.get("active"):
+                self.log("   ⚠️ Có vẻ thăng cấp chưa thành công, thử click lại.")
+                time.sleep(0.6)
+                continue
 
             time.sleep(0.8)
-
-            if not upgrade_confirmed:
-                continue
 
             success_unlock = self.unlock_all_locks(max_attempts=6, force_click=True)
             if success_unlock:
                 self.locked_stats = [False] * 4
-                self._sync_locked_stats_from_ui()
                 self.log("✅ Đã thăng cấp thành công và bỏ tích các dòng!")
                 return True
 
@@ -648,12 +634,7 @@ class AutoRefineApp:
         self.log("❌ Thử thăng cấp nhiều lần nhưng chưa thành công hoàn toàn.")
         return False
 
-    def is_lock_checked(
-        self,
-        lock_pos: list[int] | tuple[int, int],
-        *,
-        log_details: bool = True,
-    ) -> bool:
+    def is_lock_checked(self, lock_pos: list[int] | tuple[int, int]) -> bool:
         # Phân tích hình ảnh của ô khóa để xác định trạng thái: tìm dấu tích vàng
         try:
             lx, ly = int(lock_pos[0]), int(lock_pos[1])
@@ -700,12 +681,11 @@ class AutoRefineApp:
         hsv_yellow_ratio = hsv_yellow_pixels / total_pixels
 
         # Debug log để kiểm tra
-        if log_details:
-            self.log(
-                "   DEBUG Lock {}: yellow_ratio={:.3f}, bright_yellow_ratio={:.3f}, hsv_yellow_ratio={:.3f}".format(
-                    lock_pos, yellow_ratio, bright_yellow_ratio, hsv_yellow_ratio
-                )
+        self.log(
+            "   DEBUG Lock {}: yellow_ratio={:.3f}, bright_yellow_ratio={:.3f}, hsv_yellow_ratio={:.3f}".format(
+                lock_pos, yellow_ratio, bright_yellow_ratio, hsv_yellow_ratio
             )
+        )
 
         # Có dấu tích vàng nếu có đủ pixel vàng sáng
         has_checkmark = (
@@ -713,29 +693,11 @@ class AutoRefineApp:
             or yellow_ratio > 0.10
             or hsv_yellow_ratio > 0.045
         )
-
-        if log_details:
-            status = "TÍCH" if has_checkmark else "TRỐNG"
-            self.log(f"   Kết quả Lock {lock_pos}: {status}")
-
+        
+        status = "TÍCH" if has_checkmark else "TRỐNG"
+        self.log(f"   Kết quả Lock {lock_pos}: {status}")
+        
         return has_checkmark
-
-    def _sync_locked_stats_from_ui(self) -> int:
-        """Đồng bộ mảng ``self.locked_stats`` với trạng thái dấu tích thực tế."""
-
-        locked_count = 0
-        for idx, stat_cfg in enumerate(self.config["stats"]):
-            lock_pos = stat_cfg.get("lock_button", [0, 0])
-            if sum(lock_pos) == 0:
-                self.locked_stats[idx] = False
-                continue
-
-            is_checked = self.is_lock_checked(lock_pos, log_details=False)
-            self.locked_stats[idx] = bool(is_checked)
-            if is_checked:
-                locked_count += 1
-
-        return locked_count
 
     def ensure_unchecked(self, lock_pos: list[int] | tuple[int, int], *, force: bool = False) -> bool:
         """Đảm bảo ô khóa được bỏ tích.
@@ -1047,8 +1009,27 @@ class AutoRefineApp:
                     time.sleep(1.0)
                     continue
 
-                # Đồng bộ trạng thái khóa thực tế nhưng chưa bỏ tích trước khi tẩy luyện
-                locked_before_cycle = self._sync_locked_stats_from_ui()
+                # Kiểm tra xem có ô nào đang tích không (sau khi thăng cấp)
+                leftover_indices: list[int] = []
+                for idx, stat_cfg in enumerate(self.config["stats"]):
+                    if self.locked_stats[idx]:
+                        continue
+                    if sum(stat_cfg.get("lock_button", [0, 0])) > 0 and self.is_lock_checked(stat_cfg["lock_button"]):
+                        leftover_indices.append(idx)
+
+                if leftover_indices:
+                    self.log(
+                        f"⚠️ Phát hiện {len(leftover_indices)} ô khóa vẫn đang tích - đang bỏ tích lại trước khi tẩy luyện..."
+                    )
+                    if self.unlock_all_locks(max_attempts=3, force_click=True, target_indices=leftover_indices):
+                        self.log("🔄 Đã bỏ tích các ô còn lại, tiếp tục tẩy luyện sau 0.6s...")
+                        time.sleep(0.6)
+                        self.log("🔄 Đã bỏ tích các ô còn lại, tiếp tục tẩy luyện sau 1s...")
+                        time.sleep(1.0)
+                    else:
+                        self.log("❌ Không thể bỏ tích toàn bộ ô khóa, tạm dừng 2s rồi thử lại...")
+                        time.sleep(2.0)
+                    continue
 
                 # Nhấp nút Tẩy Luyện với delay dài hơn
                 pyautogui.click(self.config["refine_button"])
@@ -1126,54 +1107,69 @@ class AutoRefineApp:
                 # Kiểm tra điều kiện thăng cấp: CHỈ khi đủ 4 dòng MAX trở lên
                 num_locked = sum(1 for v in self.locked_stats if v)
                 self.log(f"   Số dòng đã khóa: {num_locked}/4")
+                
+                # Thăng cấp khi đủ 3 dòng MAX trở lên
+                if num_locked >= 3:
+                    if self.is_upgrade_available():
+                        self.log("🎯 Đủ 3 dòng MAX và nút Thăng Cấp active - Bắt đầu thăng cấp!")
+                    else:
+                        self.log("🎯 Đủ 3 dòng MAX - Thử thăng cấp (fallback)...")
 
-                area_defined = sum(self.config.get("upgrade_area", [0, 0, 0, 0])) > 0
-                upgrade_available = False
-                if num_locked >= 4:
-                    if area_defined:
-                        upgrade_available = self.is_upgrade_available()
-                    if (
-                        locked_this_cycle
-                        or locked_before_cycle < num_locked
-                        or (area_defined and upgrade_available)
-                    ):
-                        self.pending_upgrade = True
+                    try:
+                        if self.game_window:
+                            self.game_window.activate()
+                            time.sleep(0.2)
+                    except Exception:
+                        pass
 
-                # Thăng cấp khi đủ 4 dòng MAX trở lên
-                if num_locked >= 4 and self.pending_upgrade:
-                    upgrade_ready = upgrade_available or not area_defined
+                    upgrade_result = self.perform_upgrade_sequence()
+                    if upgrade_result:
+                        self.log("🔄 Tự động tiếp tục tẩy luyện với mục tiêu mới...")
+                        time.sleep(0.6)
+                    
+                    # Click nút Thăng Cấp 1 lần duy nhất
+                    upgrade_clicked = False
+                    if sum(self.config.get("upgrade_button", [0,0])) > 0:
+                        bx, by = self.config["upgrade_button"]
+                        pyautogui.moveTo(bx, by)
+                        pyautogui.click(bx, by)
+                        upgrade_clicked = True
+                        self.log(f"▶️ Đã click nút Thăng Cấp tại ({bx}, {by})")
+                    elif sum(self.config.get("upgrade_area", [0,0,0,0])) > 0:
+                        ux, uy, uw, uh = self.config["upgrade_area"]
+                        cx, cy = ux + uw//2, uy + uh//2
+                        pyautogui.moveTo(cx, cy)
+                        pyautogui.click(cx, cy)
+                        upgrade_clicked = True
+                        self.log(f"▶️ Đã click vùng Thăng Cấp tại ({cx}, {cy})")
+                    
+                    if upgrade_clicked:
+                        # Chờ animation thăng cấp hoàn thành
+                        time.sleep(4.0) # Tăng thời gian chờ animation
 
-                    if upgrade_ready:
-                        if upgrade_available:
-                            self.log("🎯 Đủ 4 dòng MAX và nút Thăng Cấp active - Bắt đầu thăng cấp!")
-                        else:
-                            self.log("🎯 Đủ 4 dòng MAX - Thử thăng cấp (fallback)...")
+                        success_unlock = self.unlock_all_locks(max_attempts=6, force_click=True)
+                        self.locked_stats = [False] * 4
 
-                        try:
-                            if self.game_window:
-                                self.game_window.activate()
-                                time.sleep(0.2)
-                        except Exception:
-                            pass
-
-                        upgrade_result = self.perform_upgrade_sequence()
-                        if upgrade_result:
-                            self.pending_upgrade = False
+                        if success_unlock:
+                            self.log("✅ Đã thăng cấp thành công và bỏ tích các dòng!")
                             self.log("🔄 Tự động tiếp tục tẩy luyện với mục tiêu mới...")
                             time.sleep(0.6)
                         else:
-                            self.log("⏳ Chưa thể hoàn tất thăng cấp, sẽ thử lại sau 1.0s.")
+                            self.log(
+                                "⚠️ Không thể xác nhận bỏ tích hết các dòng sau thăng cấp. Tránh tẩy luyện sai nên tool sẽ dừng để bạn kiểm tra lại."
+                            )
+                            self.is_running = False
+                            self.root.after(0, self._update_button_states)
                             time.sleep(1.0)
                         continue
                     else:
-                        self.log("🎯 Đủ 4 dòng MAX nhưng nút Thăng Cấp chưa sáng - chờ thêm 0.6s...")
-                        time.sleep(0.6)
-                        continue
+                        self.log("⏳ Chưa thể hoàn tất thăng cấp, sẽ thử lại sau 1.0s.")
+                        time.sleep(1.0)
 
-                elif num_locked < 4:
-                    if num_locked == 0:
-                        self.pending_upgrade = False
-                    self.log(f"📊 Chưa đủ 4 dòng MAX ({num_locked}/4) - Tiếp tục tẩy luyện...")
+                    continue
+
+                elif num_locked < 3:
+                    self.log(f"📊 Chưa đủ 3 dòng MAX ({num_locked}/4) - Tiếp tục tẩy luyện...")
 
                 # Nếu không có điều kiện thăng cấp, tiếp tục chu kỳ bình thường
                 if all_done:
