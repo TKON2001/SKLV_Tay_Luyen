@@ -1003,7 +1003,7 @@ class AutoRefineApp:
             try:
                 cycle_count += 1
                 self.log(f"--- Chu kỳ {cycle_count} ---")
-                
+
                 if not self.game_window or not self.game_window.isActive:
                     self.log("Cửa sổ game không hoạt động. Tạm dừng.")
                     time.sleep(1.0)
