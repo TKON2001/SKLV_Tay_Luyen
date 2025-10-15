@@ -241,6 +241,15 @@ class AutoRefineApp:
         # Checkbox: Bắt buộc chữ đỏ
         ttk.Checkbutton(control_frame, text="Bắt buộc chữ đỏ", variable=self.require_red_var, command=self.save_config).pack(side=tk.LEFT, padx=10)
 
+        # 3b. Khung lấy mẫu ô khóa
+        tpl_frame = ttk.LabelFrame(main_frame, text="Mẫu Ô Khóa (Template)", padding="10")
+        tpl_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(tpl_frame, text="Hướng dẫn: Di chuyển chuột vào giữa ô khóa, trạng thái tương ứng và nhấn F8").pack(anchor=tk.W)
+        btns = ttk.Frame(tpl_frame)
+        btns.pack(fill=tk.X, pady=4)
+        ttk.Button(btns, text="Lấy mẫu: ĐÃ TÍCH", command=lambda: self.capture_lock_template(True)).pack(side=tk.LEFT, padx=6)
+        ttk.Button(btns, text="Lấy mẫu: CHƯA TÍCH", command=lambda: self.capture_lock_template(False)).pack(side=tk.LEFT, padx=6)
+
         # 4. Khung log
         log_frame = ttk.LabelFrame(main_frame, text="Log", padding="10")
         log_frame.pack(fill=tk.BOTH, expand=True, pady=5)
@@ -1348,6 +1357,55 @@ class AutoRefineApp:
         self._tpl_unchecked = _load_one(unchecked_path)
         if self._tpl_checked is not None or self._tpl_unchecked is not None:
             self.log("🔎 Đã tải template nhận diện ô khóa.")
+
+    def capture_lock_template(self, is_checked: bool) -> None:
+        if not self.game_window:
+            messagebox.showerror("Lỗi", "Vui lòng chọn cửa sổ game trước!")
+            return
+        try:
+            self.game_window.activate()
+        except Exception:
+            pass
+        time.sleep(0.3)
+
+        info_window = tk.Toplevel(self.root)
+        info_window.title("Lấy mẫu ô khóa")
+        info_window.geometry("420x140")
+        info_window.transient(self.root)
+        info_window.grab_set()
+        msg = "Đưa chuột vào giữa ô khóa ĐÃ TÍCH và nhấn F8" if is_checked else "Đưa chuột vào giữa ô khóa CHƯA TÍCH và nhấn F8"
+        tk.Label(info_window, text=msg, padx=16, pady=16, justify=tk.LEFT).pack()
+
+        pos: list[tuple[int,int]] = []
+        def on_f8(event):
+            if event.name == 'f8':
+                pos.append(pyautogui.position())
+                keyboard.unhook_all()
+                info_window.destroy()
+
+        keyboard.on_press(on_f8)
+        self.root.wait_window(info_window)
+
+        if not pos:
+            return
+        cx, cy = pos[0]
+        box = 28
+        half = box // 2
+        left = max(0, cx - half)
+        top = max(0, cy - half)
+        snap = pyautogui.screenshot(region=(left, top, box, box))
+        out_name = self.config.get("lock_templates", {}).get("checked" if is_checked else "unchecked")
+        if not out_name:
+            out_name = "lock_checked.png" if is_checked else "lock_unchecked.png"
+            self.config.setdefault("lock_templates", {})["checked" if is_checked else "unchecked"] = out_name
+        try:
+            snap.save(out_name)
+            self.save_config()
+            self._load_lock_templates()
+            state_txt = "ĐÃ TÍCH" if is_checked else "CHƯA TÍCH"
+            self.log(f"✅ Đã lưu mẫu ô khóa {state_txt}: {out_name}")
+        except Exception as e:
+            self.log(f"❌ Lỗi lưu mẫu ô khóa: {e}")
 
     def _template_similarity(self, img: Image.Image, tpl_norm) -> float:
         if tpl_norm is None:
