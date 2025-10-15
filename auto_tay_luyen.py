@@ -123,6 +123,7 @@ class AutoRefineApp:
             "require_red": False
         }
         self.locked_stats = [False] * 4
+        self.pending_upgrade = False
         self.config_file = "config_tay_luyen.json"
         self.require_red_var = tk.BooleanVar(value=False)
 
@@ -1036,6 +1037,7 @@ class AutoRefineApp:
                 time.sleep(1.6) # Rút ngắn thời gian chờ UI load hoàn toàn
 
                 all_done = True
+                locked_this_cycle = False
                 for i, stat in enumerate(self.config["stats"]):
                     if self.locked_stats[i]:
                         self.log(f"   Chỉ số {i+1}: Đã khóa")
@@ -1097,6 +1099,7 @@ class AutoRefineApp:
                             time.sleep(0.8) # Chờ trước khi click khóa
                             pyautogui.click(stat["lock_button"])
                             self.locked_stats[i] = True
+                            locked_this_cycle = True
                             time.sleep(1.0) # Chờ UI cập nhật sau khi khóa
                         else:
                             self.log(f"   → Đạt mục tiêu nhưng chưa xác nhận chữ đỏ, bỏ qua")
@@ -1150,9 +1153,7 @@ class AutoRefineApp:
                         if success_unlock:
                             self.log("✅ Đã thăng cấp thành công và bỏ tích các dòng!")
                             self.log("🔄 Tự động tiếp tục tẩy luyện với mục tiêu mới...")
-                            self.log("💡 Tool sẽ tự động tẩy luyện liên tục cho đến khi bạn dừng thủ công.")
-                            time.sleep(1.0)
-                            continue
+                            time.sleep(0.6)
                         else:
                             self.log(
                                 "⚠️ Không thể xác nhận bỏ tích hết các dòng sau thăng cấp. Tránh tẩy luyện sai nên tool sẽ dừng để bạn kiểm tra lại."
@@ -1160,7 +1161,7 @@ class AutoRefineApp:
                             self.is_running = False
                             self.root.after(0, self._update_button_states)
                             time.sleep(1.0)
-                            continue
+                        continue
                     else:
                         self.log("⏳ Chưa thể hoàn tất thăng cấp, sẽ thử lại sau 1.0s.")
                         time.sleep(1.0)
@@ -1220,6 +1221,7 @@ class AutoRefineApp:
         
         self.is_running = True
         self.locked_stats = [False] * 4 # Reset trạng thái khóa
+        self.pending_upgrade = False
         self._update_button_states()
         self.automation_thread = threading.Thread(target=self.automation_loop, daemon=True)
         self.automation_thread.start()
