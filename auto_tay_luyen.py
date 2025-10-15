@@ -1023,6 +1023,8 @@ class AutoRefineApp:
                     if self.unlock_all_locks(max_attempts=3, force_click=True, target_indices=leftover_indices):
                         self.log("🔄 Đã bỏ tích các ô còn lại, tiếp tục tẩy luyện sau 0.6s...")
                         time.sleep(0.6)
+                        self.log("🔄 Đã bỏ tích các ô còn lại, tiếp tục tẩy luyện sau 1s...")
+                        time.sleep(1.0)
                     else:
                         self.log("❌ Không thể bỏ tích toàn bộ ô khóa, tạm dừng 2s rồi thử lại...")
                         time.sleep(2.0)
@@ -1121,6 +1123,44 @@ class AutoRefineApp:
                     if upgrade_result:
                         self.log("🔄 Tự động tiếp tục tẩy luyện với mục tiêu mới...")
                         time.sleep(0.6)
+                    
+                    # Click nút Thăng Cấp 1 lần duy nhất
+                    upgrade_clicked = False
+                    if sum(self.config.get("upgrade_button", [0,0])) > 0:
+                        bx, by = self.config["upgrade_button"]
+                        pyautogui.moveTo(bx, by)
+                        pyautogui.click(bx, by)
+                        upgrade_clicked = True
+                        self.log(f"▶️ Đã click nút Thăng Cấp tại ({bx}, {by})")
+                    elif sum(self.config.get("upgrade_area", [0,0,0,0])) > 0:
+                        ux, uy, uw, uh = self.config["upgrade_area"]
+                        cx, cy = ux + uw//2, uy + uh//2
+                        pyautogui.moveTo(cx, cy)
+                        pyautogui.click(cx, cy)
+                        upgrade_clicked = True
+                        self.log(f"▶️ Đã click vùng Thăng Cấp tại ({cx}, {cy})")
+                    
+                    if upgrade_clicked:
+                        # Chờ animation thăng cấp hoàn thành
+                        time.sleep(4.0) # Tăng thời gian chờ animation
+
+                        success_unlock = self.unlock_all_locks(max_attempts=6, force_click=True)
+                        self.locked_stats = [False] * 4
+
+                        if success_unlock:
+                            self.log("✅ Đã thăng cấp thành công và bỏ tích các dòng!")
+                            self.log("🔄 Tự động tiếp tục tẩy luyện với mục tiêu mới...")
+                            self.log("💡 Tool sẽ tự động tẩy luyện liên tục cho đến khi bạn dừng thủ công.")
+                            time.sleep(1.0)
+                            continue
+                        else:
+                            self.log(
+                                "⚠️ Không thể xác nhận bỏ tích hết các dòng sau thăng cấp. Tránh tẩy luyện sai nên tool sẽ dừng để bạn kiểm tra lại."
+                            )
+                            self.is_running = False
+                            self.root.after(0, self._update_button_states)
+                            time.sleep(1.0)
+                            continue
                     else:
                         self.log("⏳ Chưa thể hoàn tất thăng cấp, sẽ thử lại sau 1.0s.")
                         time.sleep(1.0)
