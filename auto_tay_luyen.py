@@ -1178,21 +1178,39 @@ class AutoRefineApp:
                         pyautogui.click(cx, cy)
                         upgrade_clicked = True
                         self.log(f"▶️ Đã click vùng Thăng Cấp tại ({cx}, {cy})")
-                    
+
                     if upgrade_clicked:
                         # Chờ animation thăng cấp hoàn thành
                         time.sleep(4.0) # Tăng thời gian chờ animation
 
+                        # Bỏ tích và xác nhận bằng template: yêu cầu cả 4 ô là 'chưa tích'
                         success_unlock = self.unlock_all_locks(max_attempts=6, force_click=True)
                         self.locked_stats = [False] * 4
 
-                        if success_unlock:
-                            self.log("✅ Đã thăng cấp thành công và bỏ tích các dòng!")
+                        # Sau khi bỏ tích bằng click, kiểm tra bằng template vài lần để chắc chắn
+                        check_rounds = 0
+                        all_ok = False
+                        while check_rounds < 3 and success_unlock:
+                            tpl_status = self.all_locks_unchecked_by_template()
+                            if tpl_status is True:
+                                all_ok = True
+                                break
+                            if tpl_status is False:
+                                self.log("   ⏳ Template: phát hiện còn ô đang TÍCH, thử bỏ tích lại...")
+                                # Thử bỏ tích mạnh lại 1 vòng ngắn
+                                success_unlock = self.unlock_all_locks(max_attempts=3, force_click=True)
+                            else:
+                                self.log("   ⏳ Template: không đủ chắc chắn, sẽ kiểm tra lại sau 0.4s...")
+                            check_rounds += 1
+                            time.sleep(0.4)
+
+                        if success_unlock and all_ok:
+                            self.log("✅ Đã thăng cấp thành công và xác nhận 4 ô đều CHƯA TÍCH (template)!")
                             self.log("🔄 Tự động tiếp tục tẩy luyện với mục tiêu mới...")
                             time.sleep(0.6)
                         else:
                             self.log(
-                                "⚠️ Không thể xác nhận bỏ tích hết các dòng sau thăng cấp. Tránh tẩy luyện sai nên tool sẽ dừng để bạn kiểm tra lại."
+                                "⚠️ Không thể xác nhận 4 ô đều CHƯA TÍCH sau thăng cấp. Tránh tẩy luyện sai nên tool sẽ dừng để bạn kiểm tra lại."
                             )
                             self.is_running = False
                             self.root.after(0, self._update_button_states)
@@ -1201,7 +1219,6 @@ class AutoRefineApp:
                     else:
                         self.log("⏳ Chưa thể hoàn tất thăng cấp, sẽ thử lại sau 1.0s.")
                         time.sleep(1.0)
-
                     continue
 
                 elif num_locked < 3 or total_max < 4:
@@ -1431,6 +1448,50 @@ class AutoRefineApp:
             return num / den
         except Exception:
             return -1.0
+
+    def _is_unchecked_by_template(self, snap: Image.Image) -> bool | None:
+        """Trả về True nếu ảnh ô khóa khớp mẫu 'chưa tích', False nếu khớp 'đã tích'.
+        Trả về None nếu không đủ mẫu để kết luận.
+        """
+        try:
+            if self._tpl_checked is None and self._tpl_unchecked is None:
+                return None
+            sim_checked = self._template_similarity(snap, self._tpl_checked)
+            sim_unchecked = self._template_similarity(snap, self._tpl_unchecked)
+            # Quyết định ngưỡng
+            if sim_unchecked >= 0.65 and (sim_unchecked - max(-1.0, sim_checked)) >= 0.10:
+                return True
+            if sim_checked >= 0.65 and (sim_checked - max(-1.0, sim_unchecked)) >= 0.10:
+                return False
+            return None
+        except Exception:
+            return None
+
+    def all_locks_unchecked_by_template(self) -> bool | None:
+        """Kiểm tra tất cả ô khóa theo template. True nếu tất cả 'chưa tích'.
+        False nếu có ít nhất một ô khớp 'đã tích'. None nếu không đủ mẫu để kết luận.
+        """
+        results: list[bool | None] = []
+        for stat_cfg in self.config.get("stats", []):
+            lock_pos = stat_cfg.get("lock_button", [0, 0])
+            if sum(lock_pos) == 0:
+                continue
+            lx, ly = int(lock_pos[0]), int(lock_pos[1])
+            box = 28
+            half = box // 2
+            left = max(0, lx - half)
+            top = max(0, ly - half)
+            snap = pyautogui.screenshot(region=(left, top, box, box))
+            res = self._is_unchecked_by_template(snap)
+            results.append(res)
+
+        if not results:
+            return None
+        if any(r is False for r in results):
+            return False
+        if all(r is True for r in results):
+            return True
+        return None
 
 
 if __name__ == "__main__":
