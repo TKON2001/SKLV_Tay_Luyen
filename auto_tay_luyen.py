@@ -648,6 +648,10 @@ class AutoRefineApp:
             time.sleep(0.8)
 
             success_unlock = self.unlock_all_locks(max_attempts=6, force_click=True)
+            if not success_unlock:
+                if self.brute_force_unlock_locks(cycles=3):
+                    time.sleep(0.4)
+                    success_unlock = self.unlock_all_locks(max_attempts=4, force_click=True)
             if success_unlock:
                 self.locked_stats = [False] * 4
                 self.log("✅ Đã thăng cấp thành công và bỏ tích các dòng!")
@@ -666,8 +670,8 @@ class AutoRefineApp:
         except Exception:
             return False
         
-        # Vùng chụp gọn hơn để giảm nhiễu nền
-        box_size = 28
+        # Vùng chụp đủ lớn để bao phủ hoàn toàn dấu tích vàng
+        box_size = 32
         half = box_size // 2
         left = max(0, lx - half)
         top = max(0, ly - half)
@@ -890,6 +894,73 @@ class AutoRefineApp:
         self.log("⚠️ Không thể bỏ tích hết các dòng sau nhiều lần thử.")
         return False
 
+    def brute_force_unlock_locks(self, cycles: int = 2, jitter: int = 2) -> bool:
+        """Nhấp mạnh vào toàn bộ các ô khóa mà không cần nhận diện trạng thái.
+
+        Hàm này được dùng khi thao tác thường xuyên ``unlock_all_locks`` thất bại
+        vì OCR hoặc template nhận diện sai. Logic: di chuyển chuột tới mỗi vị trí
+        đã cấu hình, click với nhiều offset nhỏ và double-click nhằm đảm bảo
+        checkbox được bỏ tích.
+        """
+
+        coords: list[tuple[int, int]] = []
+        for stat_cfg in self.config.get("stats", []):
+            lock_pos = stat_cfg.get("lock_button", [0, 0])
+            if sum(lock_pos) == 0:
+                continue
+            try:
+                coords.append((int(lock_pos[0]), int(lock_pos[1])))
+            except Exception:
+                continue
+
+        if not coords:
+            return False
+
+        try:
+            if self.game_window:
+                self.game_window.activate()
+                time.sleep(0.2)
+        except Exception:
+            pass
+
+        self.log("   🔁 Bruteforce: thử nhấp mạnh để bỏ tích tất cả ô khóa...")
+
+        for cycle in range(max(1, cycles)):
+            for idx, (x, y) in enumerate(coords):
+                offsets = [
+                    (0, 0),
+                    (1, 0),
+                    (0, 1),
+                    (-1, 0),
+                    (0, -1),
+                ]
+                if jitter > 0:
+                    offsets.extend([
+                        (jitter, jitter),
+                        (-jitter, jitter),
+                        (jitter, -jitter),
+                        (-jitter, -jitter),
+                    ])
+
+                for ox, oy in offsets:
+                    px, py = x + ox, y + oy
+                    try:
+                        pyautogui.moveTo(px, py)
+                        time.sleep(0.05)
+                        pyautogui.click(px, py)
+                        time.sleep(0.08)
+                    except Exception as exc:
+                        self.log(f"      ⚠️ Bruteforce: lỗi click ô khóa {idx+1}: {exc}")
+                try:
+                    pyautogui.doubleClick(x, y)
+                except Exception:
+                    pass
+                time.sleep(0.12)
+
+            time.sleep(0.25)
+
+        return True
+
     def normalize_vi(self, s: str) -> str:
         # Bỏ dấu tiếng Việt để so khớp văn bản đơn giản
         nfkd = unicodedata.normalize('NFKD', s)
@@ -911,6 +982,10 @@ class AutoRefineApp:
             'S': '5'
         }
         s = ''.join(trans.get(ch, ch) for ch in s)
+        # Khử bớt các ký tự thừa sau dấu '+' để tránh đọc nhầm giá trị
+        s = re.sub(r'\+[-.]+', '+', s)
+        # Thu gọn chuỗi "---" thành "-" để tránh phá cấu trúc min-max
+        s = re.sub(r'-{3,}', '-', s)
         return s
 
     def fix_percent_current_with_max(self, current_value: float, range_max: float | None) -> float:
@@ -941,6 +1016,8 @@ class AutoRefineApp:
                 return False
             if range_max is not None and current_value > range_max * 10:
                 return False
+            if range_max is None and current_value > 5_000_000:
+                return False
             return True
 
     def parse_ocr_result(self, text):
@@ -955,48 +1032,61 @@ class AutoRefineApp:
         range_max = None
         is_percent = '%' in cleaned
 
-        # 1) Tìm cặp min-max dạng phần trăm trong ngoặc: (a%-b%)
-        pm = re.search(r'\((\d+(?:\.\d+)?)%\s*-\s*(\d+(?:\.\d+)?)%\)?', cleaned)
-        if pm:
+        # 1) Tìm cặp min-max (có thể thiếu ngoặc hoặc xen ký tự lạ)
+        range_candidates: list[tuple[float, bool]] = []
+        for match in re.finditer(r'(\d+(?:\.\d+)?)(%?)-(\d+(?:\.\d+)?)(%?)', cleaned):
+            left_str, left_pct, right_str, right_pct = match.groups()
             try:
-                a = float(pm.group(1))
-                b = float(pm.group(2))
-                range_max = max(a, b)
+                left_val = float(left_str)
+                right_val = float(right_str)
+            except ValueError:
+                continue
+
+            pair_is_percent = bool(left_pct or right_pct)
+            if pair_is_percent:
                 is_percent = True
-            except:
-                range_max = None
-        else:
-            # 1b) Nếu không phải phần trăm, thử bắt cặp số nguyên trong ngoặc: (min-max)
-            nm = re.search(r'\((\d+)\s*-\s*(\d+)\)?', cleaned)
-            if nm:
-                try:
-                    a = int(nm.group(1))
-                    b = int(nm.group(2))
-                    range_max = max(a, b)
-                except:
-                    range_max = None
+
+            # Loại bỏ các giá trị bất thường (quá lớn so với mức mong đợi)
+            def _is_reasonable(val: float, *, percent: bool) -> bool:
+                if percent:
+                    return 0 < val <= 400
+                return 0 < val <= 5_000_000
+
+            for candidate in (left_val, right_val):
+                if _is_reasonable(candidate, percent=pair_is_percent):
+                    range_candidates.append((candidate, pair_is_percent))
+
+        if range_candidates:
+            # Ưu tiên các giá trị có đánh dấu phần trăm rõ ràng
+            percent_candidates = [val for val, pct in range_candidates if pct]
+            if percent_candidates:
+                range_max = max(percent_candidates)
+                is_percent = True
+            else:
+                range_max = max(val for val, _ in range_candidates)
 
         # 2) Lấy số sau dấu '+' dạng phần trăm: +x.x%
-        plus_percent = re.search(r'\+\s*(\d+(?:\.\d+)?)\s*%\b', cleaned)
-        plus_number  = re.search(r'\+\s*(\d+(?:\.\d+)?)\b(?!%)', cleaned)
-        if plus_percent:
-            current_value = float(plus_percent.group(1))
-            is_percent = True
-        elif plus_number:
-            if is_percent:
-                # Nếu đã xác định là phần trăm từ cặp (min%-max%) mà dấu % sau dấu + bị mất,
-                # vẫn đọc giá trị dạng số thực để so sánh chính xác A == C
-                current_value = float(plus_number.group(1))
-            else:
-                current_value = int(float(plus_number.group(1)))
+        plus_match = re.search(r'\+\s*[-.]*([0-9]+(?:\.[0-9]+)?)', cleaned)
+        if plus_match:
+            number_text = plus_match.group(1)
+            current_value = float(number_text)
+            tail_index = plus_match.end()
+            if tail_index < len(cleaned) and cleaned[tail_index] == '%':
+                is_percent = True
         else:
             # Fallback an toàn
-            nums = re.findall(r'(\d+(?:\.\d+)?)', cleaned)
+            nums = list(re.finditer(r'(\d+(?:\.\d+)?)', cleaned))
             if nums:
-                if is_percent:
-                    current_value = float(nums[0])
+                first = nums[0]
+                number_text = first.group(1)
+                if first.end() < len(cleaned) and cleaned[first.end()] == '%':
+                    is_percent = True
+                    current_value = float(number_text)
                 else:
-                    current_value = int(float(nums[0]))
+                    if '.' in number_text:
+                        current_value = float(number_text)
+                    else:
+                        current_value = int(float(number_text))
             else:
                 return (0.0 if is_percent else 0), None, is_percent
 
@@ -1185,12 +1275,18 @@ class AutoRefineApp:
 
                         # Bỏ tích và xác nhận bằng template: yêu cầu cả 4 ô là 'chưa tích'
                         success_unlock = self.unlock_all_locks(max_attempts=6, force_click=True)
+                        if not success_unlock:
+                            if self.brute_force_unlock_locks(cycles=3):
+                                time.sleep(0.4)
+                                success_unlock = self.unlock_all_locks(max_attempts=4, force_click=True)
                         self.locked_stats = [False] * 4
 
                         # Sau khi bỏ tích bằng click, kiểm tra bằng template vài lần để chắc chắn
                         check_rounds = 0
                         all_ok = False
-                        while check_rounds < 3 and success_unlock:
+                        used_template = (self._tpl_checked is not None) or (self._tpl_unchecked is not None)
+
+                        while check_rounds < 3 and success_unlock and used_template:
                             tpl_status = self.all_locks_unchecked_by_template()
                             if tpl_status is True:
                                 all_ok = True
@@ -1204,8 +1300,12 @@ class AutoRefineApp:
                             check_rounds += 1
                             time.sleep(0.4)
 
+                        if success_unlock and not all_ok:
+                            self.log("   🔍 Bỏ qua kiểm tra template hoặc chưa đủ chắc chắn, chuyển sang kiểm tra fallback bằng màu sắc...")
+                            all_ok = self.verify_all_locks_unchecked()
+
                         if success_unlock and all_ok:
-                            self.log("✅ Đã thăng cấp thành công và xác nhận 4 ô đều CHƯA TÍCH (template)!")
+                            self.log("✅ Đã thăng cấp thành công và xác nhận 4 ô đều CHƯA TÍCH!")
                             self.log("🔄 Tự động tiếp tục tẩy luyện với mục tiêu mới...")
                             time.sleep(0.6)
                         else:
@@ -1523,6 +1623,64 @@ class AutoRefineApp:
         if len(diffs) >= 3 and (sum(diffs)/max(1, len(diffs))) >= 0.09:
             return True
         return None
+
+    def verify_all_locks_unchecked(self, retries: int = 2, delay: float = 0.4, allow_bruteforce: bool = True) -> bool:
+        """Kiểm tra lại trạng thái bỏ tích của các ô khóa bằng phân tích màu sắc.
+
+        Hàm này dùng ``is_lock_checked`` để xác nhận thủ công trong trường hợp
+        thiếu mẫu template hoặc kết quả so khớp chưa rõ ràng.
+        """
+
+        indices = [idx for idx, stat_cfg in enumerate(self.config.get("stats", []))
+                   if sum(stat_cfg.get("lock_button", [0, 0])) > 0]
+        if not indices:
+            return True
+
+        still_checked: list[int] = []
+        for attempt in range(retries):
+            still_checked = []
+            for idx in indices:
+                lock_pos = self.config["stats"][idx].get("lock_button", [0, 0])
+                try:
+                    if self.is_lock_checked(lock_pos):
+                        still_checked.append(idx)
+                except Exception as exc:
+                    self.log(f"   ⚠️ Fallback: lỗi khi kiểm tra ô khóa {idx+1}: {exc}")
+                    still_checked.append(idx)
+
+            if not still_checked:
+                if attempt > 0:
+                    self.log("   ✅ Fallback màu sắc: xác nhận tất cả ô đã bỏ tích.")
+                else:
+                    self.log("   ✅ Fallback màu sắc: tất cả ô đang ở trạng thái bỏ tích.")
+                return True
+
+            if attempt < retries - 1:
+                self.log(
+                    "   ⏳ Fallback màu sắc: còn {} ô nghi ngờ đang TÍCH, chờ {:.1f}s rồi kiểm tra lại...".format(
+                        len(still_checked), delay
+                    )
+                )
+                time.sleep(delay)
+
+        if still_checked and allow_bruteforce:
+            self.log(
+                "   🔁 Fallback màu sắc: thử nhấp mạnh các ô khóa rồi kiểm tra lại..."
+            )
+            if self.brute_force_unlock_locks(cycles=3):
+                time.sleep(delay)
+                return self.verify_all_locks_unchecked(
+                    retries=retries,
+                    delay=delay,
+                    allow_bruteforce=False,
+                )
+
+        self.log(
+            "   ⚠️ Fallback màu sắc: phát hiện {} ô vẫn đang TÍCH sau {} lần kiểm tra.".format(
+                len(still_checked), retries
+            )
+        )
+        return False
 
 
 if __name__ == "__main__":
