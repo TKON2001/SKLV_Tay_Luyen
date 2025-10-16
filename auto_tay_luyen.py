@@ -982,6 +982,10 @@ class AutoRefineApp:
             'S': '5'
         }
         s = ''.join(trans.get(ch, ch) for ch in s)
+        # Khử bớt các ký tự thừa sau dấu '+' để tránh đọc nhầm giá trị
+        s = re.sub(r'\+[-.]+', '+', s)
+        # Thu gọn chuỗi "---" thành "-" để tránh phá cấu trúc min-max
+        s = re.sub(r'-{3,}', '-', s)
         return s
 
     def fix_percent_current_with_max(self, current_value: float, range_max: float | None) -> float:
@@ -1012,6 +1016,8 @@ class AutoRefineApp:
                 return False
             if range_max is not None and current_value > range_max * 10:
                 return False
+            if range_max is None and current_value > 5_000_000:
+                return False
             return True
 
     def parse_ocr_result(self, text):
@@ -1026,48 +1032,61 @@ class AutoRefineApp:
         range_max = None
         is_percent = '%' in cleaned
 
-        # 1) Tìm cặp min-max dạng phần trăm trong ngoặc: (a%-b%)
-        pm = re.search(r'\((\d+(?:\.\d+)?)%\s*-\s*(\d+(?:\.\d+)?)%\)?', cleaned)
-        if pm:
+        # 1) Tìm cặp min-max (có thể thiếu ngoặc hoặc xen ký tự lạ)
+        range_candidates: list[tuple[float, bool]] = []
+        for match in re.finditer(r'(\d+(?:\.\d+)?)(%?)-(\d+(?:\.\d+)?)(%?)', cleaned):
+            left_str, left_pct, right_str, right_pct = match.groups()
             try:
-                a = float(pm.group(1))
-                b = float(pm.group(2))
-                range_max = max(a, b)
+                left_val = float(left_str)
+                right_val = float(right_str)
+            except ValueError:
+                continue
+
+            pair_is_percent = bool(left_pct or right_pct)
+            if pair_is_percent:
                 is_percent = True
-            except:
-                range_max = None
-        else:
-            # 1b) Nếu không phải phần trăm, thử bắt cặp số nguyên trong ngoặc: (min-max)
-            nm = re.search(r'\((\d+)\s*-\s*(\d+)\)?', cleaned)
-            if nm:
-                try:
-                    a = int(nm.group(1))
-                    b = int(nm.group(2))
-                    range_max = max(a, b)
-                except:
-                    range_max = None
+
+            # Loại bỏ các giá trị bất thường (quá lớn so với mức mong đợi)
+            def _is_reasonable(val: float, *, percent: bool) -> bool:
+                if percent:
+                    return 0 < val <= 400
+                return 0 < val <= 5_000_000
+
+            for candidate in (left_val, right_val):
+                if _is_reasonable(candidate, percent=pair_is_percent):
+                    range_candidates.append((candidate, pair_is_percent))
+
+        if range_candidates:
+            # Ưu tiên các giá trị có đánh dấu phần trăm rõ ràng
+            percent_candidates = [val for val, pct in range_candidates if pct]
+            if percent_candidates:
+                range_max = max(percent_candidates)
+                is_percent = True
+            else:
+                range_max = max(val for val, _ in range_candidates)
 
         # 2) Lấy số sau dấu '+' dạng phần trăm: +x.x%
-        plus_percent = re.search(r'\+\s*(\d+(?:\.\d+)?)\s*%\b', cleaned)
-        plus_number  = re.search(r'\+\s*(\d+(?:\.\d+)?)\b(?!%)', cleaned)
-        if plus_percent:
-            current_value = float(plus_percent.group(1))
-            is_percent = True
-        elif plus_number:
-            if is_percent:
-                # Nếu đã xác định là phần trăm từ cặp (min%-max%) mà dấu % sau dấu + bị mất,
-                # vẫn đọc giá trị dạng số thực để so sánh chính xác A == C
-                current_value = float(plus_number.group(1))
-            else:
-                current_value = int(float(plus_number.group(1)))
+        plus_match = re.search(r'\+\s*[-.]*([0-9]+(?:\.[0-9]+)?)', cleaned)
+        if plus_match:
+            number_text = plus_match.group(1)
+            current_value = float(number_text)
+            tail_index = plus_match.end()
+            if tail_index < len(cleaned) and cleaned[tail_index] == '%':
+                is_percent = True
         else:
             # Fallback an toàn
-            nums = re.findall(r'(\d+(?:\.\d+)?)', cleaned)
+            nums = list(re.finditer(r'(\d+(?:\.\d+)?)', cleaned))
             if nums:
-                if is_percent:
-                    current_value = float(nums[0])
+                first = nums[0]
+                number_text = first.group(1)
+                if first.end() < len(cleaned) and cleaned[first.end()] == '%':
+                    is_percent = True
+                    current_value = float(number_text)
                 else:
-                    current_value = int(float(nums[0]))
+                    if '.' in number_text:
+                        current_value = float(number_text)
+                    else:
+                        current_value = int(float(number_text))
             else:
                 return (0.0 if is_percent else 0), None, is_percent
 
