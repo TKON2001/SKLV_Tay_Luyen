@@ -226,6 +226,7 @@ class AutoRefineApp:
         row_idx += 1
 
         self.stat_entries = []
+        rows_per_stat = 5
         for i in range(4):
             stat_frame = ttk.LabelFrame(stats_container, text=f"Chỉ số {i+1}")
             stat_frame.pack(fill=tk.X, pady=4)
