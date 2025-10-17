@@ -240,6 +240,11 @@ class AutoRefineApp:
             lock_ocr_label = ttk.Label(coords_frame, text="Chưa đặt")
             lock_ocr_label.grid(row=base_row + 1, column=3, sticky=tk.W)
             ttk.Button(coords_frame, text="Đặt vùng", command=lambda i=i: self.setup_coord("stat_lock_ocr", i)).grid(row=base_row + 1, column=4, padx=5)
+            ttk.Button(
+                coords_frame,
+                text="Lấy bỏ tích",
+                command=lambda i=i: self.capture_lock_keyword(i, checked=False),
+            ).grid(row=base_row + 1, column=5, padx=4)
 
             ttk.Label(coords_frame, text="Từ khóa bỏ tích:").grid(row=base_row + 1, column=0, sticky=tk.W)
             lock_unchecked_entry = ttk.Entry(coords_frame, width=16)
@@ -248,10 +253,17 @@ class AutoRefineApp:
             ttk.Label(coords_frame, text="Từ khóa đã khóa:").grid(row=base_row + 2, column=0, sticky=tk.W)
             lock_checked_entry = ttk.Entry(coords_frame, width=16)
             lock_checked_entry.grid(row=base_row + 2, column=1, sticky=tk.W)
+            ttk.Button(
+                coords_frame,
+                text="Lấy đã khóa",
+                command=lambda i=i: self.capture_lock_keyword(i, checked=True),
+            ).grid(row=base_row + 2, column=5, padx=4)
 
             # Hàng hiển thị trạng thái đọc hiện tại
             current_label = ttk.Label(coords_frame, text="Giá trị hiện tại: --")
-            current_label.grid(row=base_row + 3, column=0, columnspan=6, sticky=tk.W)
+            current_label.grid(row=base_row + 3, column=0, columnspan=3, sticky=tk.W)
+            lock_status_label = ttk.Label(coords_frame, text="Trạng thái khóa: --")
+            lock_status_label.grid(row=base_row + 3, column=3, columnspan=3, sticky=tk.W)
 
             self.stat_entries.append({
                 "desired_value": desired_val_entry,
@@ -261,6 +273,7 @@ class AutoRefineApp:
                 "lock_unchecked_entry": lock_unchecked_entry,
                 "lock_checked_entry": lock_checked_entry,
                 "current_label": current_label,
+                "lock_status_label": lock_status_label,
             })
 
         # Khu vực nhận diện nút Thăng Cấp
@@ -474,11 +487,91 @@ class AutoRefineApp:
         normalized = re.sub(r'[^0-9A-Z%+\-]+', ' ', normalized)
         return re.sub(r'\s+', ' ', normalized).strip()
 
+    def capture_lock_keyword(self, stat_index: int, *, checked: bool) -> None:
+        if not (0 <= stat_index < len(self.config.get("stats", []))):
+            return
+
+        stat_cfg = self.config["stats"][stat_index]
+        area = stat_cfg.get("lock_ocr_area", [0, 0, 0, 0])
+        if sum(area) == 0:
+            messagebox.showerror(
+                "Lỗi",
+                f"Vui lòng đặt vùng xác nhận khóa cho Chỉ số {stat_index + 1} trước khi lấy OCR!",
+            )
+            return
+
+        try:
+            ax, ay, aw, ah = map(int, area)
+            if aw <= 0 or ah <= 0:
+                raise ValueError("Kích thước vùng không hợp lệ")
+        except Exception:
+            messagebox.showerror(
+                "Lỗi",
+                f"Vùng xác nhận khóa của Chỉ số {stat_index + 1} không hợp lệ, vui lòng đặt lại!",
+            )
+            return
+
+        try:
+            snap = pyautogui.screenshot(region=(ax, ay, aw, ah))
+        except Exception as exc:
+            self.log(f"❌ Không thể chụp vùng OCR khóa: {exc}")
+            messagebox.showerror("Lỗi", f"Không thể chụp vùng OCR khóa: {exc}")
+            return
+
+        processed = self.process_image_for_ocr(snap)
+        debug_tag = f"lock_{stat_index + 1}_{'checked' if checked else 'unchecked'}"
+        try:
+            processed.save(f"debug_{debug_tag}.png")
+        except Exception:
+            pass
+
+        text = self.ocr_read_text(processed, debug_tag=debug_tag)
+        cleaned = text.strip()
+        if not cleaned:
+            self.log(f"⚠️ Không đọc được văn bản OCR cho Chỉ số {stat_index + 1}.")
+            messagebox.showwarning(
+                "Cảnh báo",
+                f"Không đọc được văn bản OCR cho Chỉ số {stat_index + 1}. Vui lòng thử lại.",
+            )
+            return
+
+        entry_key = "lock_checked_entry" if checked else "lock_unchecked_entry"
+        entry = self.stat_entries[stat_index][entry_key]
+        entry.delete(0, tk.END)
+        entry.insert(0, cleaned)
+
+        self.save_config()
+
+        state_label = "đã khóa" if checked else "bỏ tích"
+        self.log(f"✅ Đã ghi nhận mẫu OCR {state_label} cho Chỉ số {stat_index + 1}: '{cleaned}'")
+
+    def _update_lock_status_label(self, stat_index: int | None, status: bool | None, source: str) -> None:
+        if stat_index is None or not (0 <= stat_index < len(self.stat_entries)):
+            return
+
+        label = self.stat_entries[stat_index]["lock_status_label"]
+        if status is None:
+            text = f"Trạng thái khóa: {source}"
+        else:
+            state_txt = "ĐÃ TÍCH" if status else "CHƯA TÍCH"
+            if source:
+                text = f"Trạng thái khóa: {state_txt} ({source})"
+            else:
+                text = f"Trạng thái khóa: {state_txt}"
+
+        try:
+            self.root.after(0, lambda txt=text, lbl=label: lbl.config(text=txt))
+        except Exception:
+            try:
+                label.config(text=text)
+            except Exception:
+                pass
+
     def test_ocr(self):
         if not self.game_window:
             messagebox.showerror("Lỗi", "Vui lòng chọn cửa sổ game trước!")
             return
-        
+
         self.log("=== TEST OCR ===")
         for i, stat in enumerate(self.config["stats"]):
             if sum(stat["area"]) == 0:
@@ -514,9 +607,21 @@ class AutoRefineApp:
                 # Lưu ảnh để debug
                 processed_img.save(f"debug_stat_{i+1}.png")
                 self.log(f"Đã lưu ảnh debug: debug_stat_{i+1}.png")
-                
+
             except Exception as e:
                 self.log(f"Lỗi khi đọc chỉ số {i+1}: {e}")
+
+            lock_pos = stat.get("lock_button", [0, 0])
+            if sum(lock_pos) > 0:
+                try:
+                    checked = self.is_lock_checked(lock_pos, stat_index=i)
+                    state_txt = "ĐÃ TÍCH" if checked else "CHƯA TÍCH"
+                    self.log(f"   → Trạng thái khóa {i+1}: {state_txt}")
+                except Exception as exc:
+                    self.log(f"   ⚠️ Không thể xác định trạng thái khóa {i+1}: {exc}")
+                    self._update_lock_status_label(i, None, "Lỗi kiểm tra")
+            else:
+                self._update_lock_status_label(i, None, "Chưa đặt nút khóa")
 
     def process_image_for_ocr(self, img):
         # Chuyển sang ảnh xám
@@ -772,6 +877,7 @@ class AutoRefineApp:
         try:
             lx, ly = int(lock_pos[0]), int(lock_pos[1])
         except Exception:
+            self._update_lock_status_label(stat_index, None, "Chưa đặt nút khóa")
             return False
 
         stat_cfg = None
@@ -810,13 +916,20 @@ class AutoRefineApp:
                         label_idx = f"khóa {stat_index + 1}" if stat_index is not None else f"khóa {lock_pos}"
                         if unchecked_kw and unchecked_kw in norm_text:
                             self.log(f"   ✅ OCR xác nhận {label_idx}: phát hiện từ khóa bỏ tích '{stat_cfg.get('lock_unchecked_keyword', '')}'")
+                            self._update_lock_status_label(stat_index, False, "OCR")
                             return False
                         if checked_kw and checked_kw in norm_text:
                             self.log(f"   🔒 OCR xác nhận {label_idx}: phát hiện từ khóa đã khóa '{stat_cfg.get('lock_checked_keyword', '')}'")
+                            self._update_lock_status_label(stat_index, True, "OCR")
                             return True
+                        if norm_text:
+                            self._update_lock_status_label(stat_index, None, "OCR không khớp")
                 except Exception as exc:
                     label_idx = f"khóa {stat_index + 1}" if stat_index is not None else f"khóa {lock_pos}"
                     self.log(f"   ⚠️ OCR {label_idx}: lỗi nhận diện - {exc}")
+                    self._update_lock_status_label(stat_index, None, "Lỗi OCR")
+            elif sum(area) > 0:
+                self._update_lock_status_label(stat_index, None, "Chưa có từ khóa OCR")
 
         # Vùng chụp đủ lớn để bao phủ hoàn toàn dấu tích vàng
         box_size = 32
@@ -834,9 +947,11 @@ class AutoRefineApp:
                 # checked ~0.65 trở lên và chênh lệch > 0.10 so với unchecked
                 if sim_checked >= 0.65 and (sim_checked - max(-1.0, sim_unchecked)) >= 0.10:
                     self.log(f"   TEMPLATE Lock {lock_pos}: sim_checked={sim_checked:.3f}, sim_unchecked={sim_unchecked:.3f} => TÍCH")
+                    self._update_lock_status_label(stat_index, True, "Template")
                     return True
                 if sim_unchecked >= 0.65 and (sim_unchecked - max(-1.0, sim_checked)) >= 0.10:
                     self.log(f"   TEMPLATE Lock {lock_pos}: sim_checked={sim_checked:.3f}, sim_unchecked={sim_unchecked:.3f} => TRỐNG")
+                    self._update_lock_status_label(stat_index, False, "Template")
                     return False
                 # Nếu mơ hồ, fallback sang phân tích màu
         except Exception:
@@ -889,7 +1004,8 @@ class AutoRefineApp:
         
         status = "TÍCH" if has_checkmark else "TRỐNG"
         self.log(f"   Kết quả Lock {lock_pos}: {status}")
-        
+        self._update_lock_status_label(stat_index, has_checkmark, "Màu sắc")
+
         return has_checkmark
 
     def ensure_unchecked(self, lock_pos: list[int] | tuple[int, int], *, force: bool = False, stat_index: int | None = None) -> bool:
@@ -1618,6 +1734,8 @@ class AutoRefineApp:
                     checked_entry = self.stat_entries[i]["lock_checked_entry"]
                     checked_entry.delete(0, tk.END)
                     checked_entry.insert(0, stat.get("lock_checked_keyword", ""))
+
+                    self.stat_entries[i]["lock_status_label"].config(text="Trạng thái khóa: --")
 
                 # upgrade button/area labels
                 up_btn = self.config.get("upgrade_button", [0,0])
