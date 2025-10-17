@@ -208,62 +208,71 @@ class AutoRefineApp:
         # 2. Khung thiết lập tọa độ
         coords_frame = ttk.LabelFrame(main_frame, text="2. Thiết Lập Tọa Độ và Chỉ Số Mong Muốn", padding="10")
         coords_frame.pack(fill=tk.X, pady=5)
+        coords_frame.columnconfigure(1, weight=1)
+        coords_frame.columnconfigure(2, weight=1)
 
         # Nút Tẩy Luyện
         ttk.Label(coords_frame, text="Nút Tẩy Luyện:").grid(row=0, column=0, sticky=tk.W, pady=2)
         self.refine_btn_label = ttk.Label(coords_frame, text="Chưa thiết lập")
         self.refine_btn_label.grid(row=0, column=1, sticky=tk.W)
-        ttk.Button(coords_frame, text="Thiết lập", command=lambda: self.setup_coord("refine_button")).grid(row=0, column=2, padx=5)
+        ttk.Button(coords_frame, text="Thiết lập", command=lambda: self.setup_coord("refine_button")).grid(row=0, column=2, sticky=tk.W, padx=6)
+
+        row_idx = 1
 
         # Các chỉ số
+        stats_container = ttk.Frame(coords_frame)
+        stats_container.grid(row=row_idx, column=0, columnspan=3, sticky="ew", pady=(6, 0))
+        stats_container.columnconfigure(0, weight=1)
+        row_idx += 1
+
         self.stat_entries = []
         rows_per_stat = 5
         for i in range(4):
-            base_row = 2 + i * rows_per_stat
-            ttk.Separator(coords_frame, orient=tk.HORIZONTAL).grid(row=base_row - 1, columnspan=6, sticky="ew", pady=5)
+            stat_frame = ttk.LabelFrame(stats_container, text=f"Chỉ số {i+1}")
+            stat_frame.pack(fill=tk.X, pady=4)
+            for col in range(6):
+                stat_frame.columnconfigure(col, weight=1 if col in (1, 3, 5) else 0)
 
-            # Hàng thông tin chính
-            ttk.Label(coords_frame, text=f"Chỉ số {i+1}:").grid(row=base_row, column=0, sticky=tk.W, pady=2)
-            desired_val_entry = ttk.Entry(coords_frame, width=10)
-            desired_val_entry.grid(row=base_row, column=1, sticky=tk.W)
+            ttk.Label(stat_frame, text="Mục tiêu:").grid(row=0, column=0, sticky=tk.W, padx=4, pady=2)
+            desired_val_entry = ttk.Entry(stat_frame, width=10)
+            desired_val_entry.grid(row=0, column=1, sticky=tk.W, padx=2, pady=2)
 
-            area_label = ttk.Label(coords_frame, text="Vùng đọc: Chưa đặt")
-            area_label.grid(row=base_row, column=2, sticky=tk.W, padx=10)
-            ttk.Button(coords_frame, text="Đặt vùng", command=lambda i=i: self.setup_coord("stat_area", i)).grid(row=base_row, column=3, padx=5)
+            current_label = ttk.Label(stat_frame, text="Giá trị hiện tại: --")
+            current_label.grid(row=0, column=2, columnspan=2, sticky=tk.W, padx=4, pady=2)
 
-            lock_label = ttk.Label(coords_frame, text="Nút khóa: Chưa đặt")
-            lock_label.grid(row=base_row, column=4, sticky=tk.W, padx=10)
-            ttk.Button(coords_frame, text="Đặt nút", command=lambda i=i: self.setup_coord("stat_lock", i)).grid(row=base_row, column=5, padx=5)
+            lock_status_label = ttk.Label(stat_frame, text="Trạng thái khóa: --")
+            lock_status_label.grid(row=0, column=4, columnspan=2, sticky=tk.W, padx=4, pady=2)
 
-            # Hàng cấu hình OCR xác nhận khóa
-            ttk.Label(coords_frame, text="Vùng xác nhận:").grid(row=base_row + 1, column=2, sticky=tk.W, padx=10)
-            lock_ocr_label = ttk.Label(coords_frame, text="Chưa đặt")
-            lock_ocr_label.grid(row=base_row + 1, column=3, sticky=tk.W)
-            ttk.Button(coords_frame, text="Đặt vùng", command=lambda i=i: self.setup_coord("stat_lock_ocr", i)).grid(row=base_row + 1, column=4, padx=5)
-            ttk.Button(
-                coords_frame,
-                text="Lấy bỏ tích",
-                command=lambda i=i: self.capture_lock_keyword(i, checked=False),
-            ).grid(row=base_row + 1, column=5, padx=4)
+            ttk.Label(stat_frame, text="Vùng đọc:").grid(row=1, column=0, sticky=tk.W, padx=4, pady=2)
+            area_label = ttk.Label(stat_frame, text="Chưa đặt")
+            area_label.grid(row=1, column=1, columnspan=3, sticky=tk.W, padx=2, pady=2)
+            ttk.Button(stat_frame, text="Đặt vùng", command=lambda idx=i: self.setup_coord("stat_area", idx)).grid(row=1, column=4, sticky=tk.W, padx=4, pady=2)
 
-            ttk.Label(coords_frame, text="Từ khóa bỏ tích:").grid(row=base_row + 1, column=0, sticky=tk.W)
-            lock_unchecked_entry = ttk.Entry(coords_frame, width=16)
-            lock_unchecked_entry.grid(row=base_row + 1, column=1, sticky=tk.W)
+            ttk.Label(stat_frame, text="Nút khóa:").grid(row=2, column=0, sticky=tk.W, padx=4, pady=2)
+            lock_label = ttk.Label(stat_frame, text="Chưa đặt")
+            lock_label.grid(row=2, column=1, columnspan=3, sticky=tk.W, padx=2, pady=2)
+            ttk.Button(stat_frame, text="Đặt nút", command=lambda idx=i: self.setup_coord("stat_lock", idx)).grid(row=2, column=4, sticky=tk.W, padx=4, pady=2)
 
-            ttk.Label(coords_frame, text="Từ khóa đã khóa:").grid(row=base_row + 2, column=0, sticky=tk.W)
-            lock_checked_entry = ttk.Entry(coords_frame, width=16)
-            lock_checked_entry.grid(row=base_row + 2, column=1, sticky=tk.W)
-            ttk.Button(
-                coords_frame,
-                text="Lấy đã khóa",
-                command=lambda i=i: self.capture_lock_keyword(i, checked=True),
-            ).grid(row=base_row + 2, column=5, padx=4)
+            ttk.Label(stat_frame, text="Vùng xác nhận:").grid(row=3, column=0, sticky=tk.W, padx=4, pady=2)
+            lock_ocr_label = ttk.Label(stat_frame, text="Chưa đặt")
+            lock_ocr_label.grid(row=3, column=1, columnspan=3, sticky=tk.W, padx=2, pady=2)
+            ttk.Button(stat_frame, text="Đặt vùng", command=lambda idx=i: self.setup_coord("stat_lock_ocr", idx)).grid(row=3, column=4, sticky=tk.W, padx=4, pady=2)
 
-            # Hàng hiển thị trạng thái đọc hiện tại
-            current_label = ttk.Label(coords_frame, text="Giá trị hiện tại: --")
-            current_label.grid(row=base_row + 3, column=0, columnspan=3, sticky=tk.W)
-            lock_status_label = ttk.Label(coords_frame, text="Trạng thái khóa: --")
-            lock_status_label.grid(row=base_row + 3, column=3, columnspan=3, sticky=tk.W)
+            keyword_frame = ttk.Frame(stat_frame)
+            keyword_frame.grid(row=4, column=0, columnspan=6, sticky="ew", padx=2, pady=(4, 2))
+            for col in range(6):
+                weight = 1 if col in (1, 4) else 0
+                keyword_frame.columnconfigure(col, weight=weight)
+
+            ttk.Label(keyword_frame, text="Bỏ tích:").grid(row=0, column=0, sticky=tk.W, padx=4, pady=2)
+            lock_unchecked_entry = ttk.Entry(keyword_frame, width=18)
+            lock_unchecked_entry.grid(row=0, column=1, sticky=tk.EW, padx=2, pady=2)
+            ttk.Button(keyword_frame, text="Chụp", command=lambda idx=i: self.capture_lock_keyword(idx, checked=False)).grid(row=0, column=2, sticky=tk.W, padx=4, pady=2)
+
+            ttk.Label(keyword_frame, text="Đã khóa:").grid(row=0, column=3, sticky=tk.W, padx=(12, 4), pady=2)
+            lock_checked_entry = ttk.Entry(keyword_frame, width=18)
+            lock_checked_entry.grid(row=0, column=4, sticky=tk.EW, padx=2, pady=2)
+            ttk.Button(keyword_frame, text="Chụp", command=lambda idx=i: self.capture_lock_keyword(idx, checked=True)).grid(row=0, column=5, sticky=tk.W, padx=4, pady=2)
 
             self.stat_entries.append({
                 "desired_value": desired_val_entry,
@@ -276,18 +285,20 @@ class AutoRefineApp:
                 "lock_status_label": lock_status_label,
             })
 
-        # Khu vực nhận diện nút Thăng Cấp
-        after_stats_row = 2 + len(self.config["stats"]) * rows_per_stat
-        ttk.Separator(coords_frame, orient=tk.HORIZONTAL).grid(row=after_stats_row, columnspan=6, sticky="ew", pady=6)
-        ttk.Label(coords_frame, text="Vùng nút Thăng Cấp:").grid(row=after_stats_row + 1, column=0, sticky=tk.W, pady=2)
-        self.upgrade_area_label = ttk.Label(coords_frame, text="Chưa đặt")
-        self.upgrade_area_label.grid(row=after_stats_row + 1, column=1, columnspan=3, sticky=tk.W)
-        ttk.Button(coords_frame, text="Đặt vùng thăng cấp", command=lambda: self.setup_coord("upgrade_area")).grid(row=after_stats_row + 1, column=4, padx=5)
+        ttk.Separator(coords_frame, orient=tk.HORIZONTAL).grid(row=row_idx, column=0, columnspan=3, sticky="ew", pady=8)
+        row_idx += 1
 
-        ttk.Label(coords_frame, text="Nút Thăng Cấp:").grid(row=after_stats_row + 2, column=0, sticky=tk.W, pady=2)
+        ttk.Label(coords_frame, text="Vùng nút Thăng Cấp:").grid(row=row_idx, column=0, sticky=tk.W, pady=2)
+        self.upgrade_area_label = ttk.Label(coords_frame, text="Chưa đặt")
+        self.upgrade_area_label.grid(row=row_idx, column=1, sticky=tk.W)
+        ttk.Button(coords_frame, text="Đặt vùng", command=lambda: self.setup_coord("upgrade_area")).grid(row=row_idx, column=2, sticky=tk.W, padx=6)
+        row_idx += 1
+
+        ttk.Label(coords_frame, text="Nút Thăng Cấp:").grid(row=row_idx, column=0, sticky=tk.W, pady=2)
         self.upgrade_btn_label = ttk.Label(coords_frame, text="Chưa đặt")
-        self.upgrade_btn_label.grid(row=after_stats_row + 2, column=1, sticky=tk.W)
-        ttk.Button(coords_frame, text="Thiết lập", command=lambda: self.setup_coord("upgrade_button")).grid(row=after_stats_row + 2, column=2, padx=5)
+        self.upgrade_btn_label.grid(row=row_idx, column=1, sticky=tk.W)
+        ttk.Button(coords_frame, text="Thiết lập", command=lambda: self.setup_coord("upgrade_button")).grid(row=row_idx, column=2, sticky=tk.W, padx=6)
+        row_idx += 1
 
         # 3. Khung điều khiển
         control_frame = ttk.LabelFrame(main_frame, text="3. Điều Khiển", padding="10")
@@ -303,15 +314,6 @@ class AutoRefineApp:
         
         # Checkbox: Bắt buộc chữ đỏ
         ttk.Checkbutton(control_frame, text="Bắt buộc chữ đỏ", variable=self.require_red_var, command=self.save_config).pack(side=tk.LEFT, padx=10)
-
-        # 3b. Khung lấy mẫu ô khóa
-        tpl_frame = ttk.LabelFrame(main_frame, text="Mẫu Ô Khóa (Template)", padding="10")
-        tpl_frame.pack(fill=tk.X, pady=5)
-        ttk.Label(tpl_frame, text="Hướng dẫn: Di chuyển chuột vào giữa ô khóa, trạng thái tương ứng và nhấn F8").pack(anchor=tk.W)
-        btns = ttk.Frame(tpl_frame)
-        btns.pack(fill=tk.X, pady=4)
-        ttk.Button(btns, text="Lấy mẫu: ĐÃ TÍCH", command=lambda: self.capture_lock_template(True)).pack(side=tk.LEFT, padx=6)
-        ttk.Button(btns, text="Lấy mẫu: CHƯA TÍCH", command=lambda: self.capture_lock_template(False)).pack(side=tk.LEFT, padx=6)
 
         # 4. Khung log
         log_frame = ttk.LabelFrame(main_frame, text="Log", padding="10")
@@ -424,11 +426,18 @@ class AutoRefineApp:
             x2, y2 = positions[1]
             area = [min(x1, x2), min(y1, y2), abs(x2-x1), abs(y2-y1)]
             self.config["stats"][index]["area"] = area
-            self.stat_entries[index]["area_label"].config(text=f"Vùng đọc: Đã đặt ({area[2]}x{area[3]})")
+            self.stat_entries[index]["area_label"].config(text=f"Đã đặt ({area[2]}x{area[3]})")
             self.save_config()
         elif coord_type == "stat_lock" and positions:
             self.config["stats"][index]["lock_button"] = list(positions[0])
-            self.stat_entries[index]["lock_label"].config(text=f"Nút khóa: Đã đặt")
+            self.stat_entries[index]["lock_label"].config(text=f"X={positions[0][0]}, Y={positions[0][1]}")
+            self.save_config()
+        elif coord_type == "stat_lock_ocr" and len(positions) == 2:
+            x1, y1 = positions[0]
+            x2, y2 = positions[1]
+            area = [min(x1, x2), min(y1, y2), abs(x2-x1), abs(y2-y1)]
+            self.config["stats"][index]["lock_ocr_area"] = area
+            self.stat_entries[index]["lock_ocr_label"].config(text=f"Đã đặt ({area[2]}x{area[3]})")
             self.save_config()
         elif coord_type == "stat_lock_ocr" and len(positions) == 2:
             x1, y1 = positions[0]
@@ -1701,15 +1710,15 @@ class AutoRefineApp:
                         continue
                     area = stat.get("area", [0, 0, 0, 0])
                     if sum(area) > 0:
-                        self.stat_entries[i]["area_label"].config(text=f"Vùng đọc: Đã đặt ({area[2]}x{area[3]})")
+                        self.stat_entries[i]["area_label"].config(text=f"Đã đặt ({area[2]}x{area[3]})")
                     else:
-                        self.stat_entries[i]["area_label"].config(text="Vùng đọc: Chưa đặt")
+                        self.stat_entries[i]["area_label"].config(text="Chưa đặt")
 
                     lock_btn = stat.get("lock_button", [0, 0])
                     if sum(lock_btn) > 0:
-                        self.stat_entries[i]["lock_label"].config(text="Nút khóa: Đã đặt")
+                        self.stat_entries[i]["lock_label"].config(text=f"X={lock_btn[0]}, Y={lock_btn[1]}")
                     else:
-                        self.stat_entries[i]["lock_label"].config(text="Nút khóa: Chưa đặt")
+                        self.stat_entries[i]["lock_label"].config(text="Chưa đặt")
 
                     lock_area = stat.get("lock_ocr_area", [0, 0, 0, 0])
                     if sum(lock_area) > 0:
