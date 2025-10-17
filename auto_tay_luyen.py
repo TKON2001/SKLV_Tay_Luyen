@@ -233,6 +233,7 @@ class AutoRefineApp:
         row_idx += 1
 
         self.stat_entries = []
+        rows_per_stat = 5
         for i in range(4):
             stat_frame = ttk.LabelFrame(stats_container, text=f"Chỉ số {i+1}")
             stat_frame.pack(fill=tk.X, pady=4)
@@ -1513,6 +1514,29 @@ class AutoRefineApp:
             best = -400.0
 
         return best
+
+    def normalize_percent_value(self, value: float, reference: float | None = None) -> float:
+        """Chuẩn hoá giá trị % mà không làm mất 3 chữ số như 224%.
+
+        Nếu ``reference`` được cung cấp (thường là giá trị MAX hoặc CURRENT tương ứng),
+        ưu tiên chọn ứng viên gần ``reference`` nhất. Nếu không có ``reference``, chọn
+        ứng viên nằm trong khoảng [0, 400] với độ lớn lớn nhất để tránh rơi xuống 2 chữ số.
+        """
+
+        candidates = [value]
+        for div in (10.0, 100.0, 1000.0, 10000.0):
+            candidates.append(value / div)
+
+        if reference is not None:
+            best = min(candidates, key=lambda cand: abs(cand - reference))
+            return best
+
+        # Không có reference: chọn ứng viên trong khoảng hợp lý nhất (0..400)
+        plausible = [cand for cand in candidates if 0 <= cand <= 400]
+        if plausible:
+            # Ưu tiên giá trị lớn nhất trong khoảng hợp lý để giữ đủ chữ số
+            return max(plausible)
+        return value
 
     def is_read_valid(self, current_value, range_max, is_percent: bool) -> bool:
         if is_percent:
