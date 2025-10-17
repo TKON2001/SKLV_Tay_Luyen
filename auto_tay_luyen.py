@@ -226,6 +226,7 @@ class AutoRefineApp:
         row_idx += 1
 
         self.stat_entries = []
+        rows_per_stat = 5
         for i in range(4):
             stat_frame = ttk.LabelFrame(stats_container, text=f"Chỉ số {i+1}")
             stat_frame.pack(fill=tk.X, pady=4)
@@ -430,6 +431,13 @@ class AutoRefineApp:
         elif coord_type == "stat_lock" and positions:
             self.config["stats"][index]["lock_button"] = list(positions[0])
             self.stat_entries[index]["lock_label"].config(text=f"X={positions[0][0]}, Y={positions[0][1]}")
+            self.save_config()
+        elif coord_type == "stat_lock_ocr" and len(positions) == 2:
+            x1, y1 = positions[0]
+            x2, y2 = positions[1]
+            area = [min(x1, x2), min(y1, y2), abs(x2-x1), abs(y2-y1)]
+            self.config["stats"][index]["lock_ocr_area"] = area
+            self.stat_entries[index]["lock_ocr_label"].config(text=f"Đã đặt ({area[2]}x{area[3]})")
             self.save_config()
         elif coord_type == "stat_lock_ocr" and len(positions) == 2:
             x1, y1 = positions[0]
