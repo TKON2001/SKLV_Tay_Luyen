@@ -1442,9 +1442,10 @@ class AutoRefineApp:
         self,
         value: float,
         reference: float | None = None,
-        *,
+        *legacy_tokens: str,
         raw_token: str | None = None,
         reference_token: str | None = None,
+        **legacy_kwargs,
     ) -> float:
         """Chuẩn hoá giá trị % mà không làm mất 3 chữ số như 224%.
 
@@ -1452,6 +1453,21 @@ class AutoRefineApp:
         ưu tiên chọn ứng viên gần ``reference`` nhất. Nếu không có ``reference``, chọn
         ứng viên nằm trong khoảng [0, 400] với độ lớn lớn nhất để tránh rơi xuống 2 chữ số.
         """
+
+        # --- Tương thích ngược ---
+        # Các phiên bản cũ có thể truyền đối số vị trí hoặc keyword lạ. Gom các giá trị này
+        # về ``raw_token``/``reference_token`` và bỏ qua phần còn lại để tránh lỗi runtime.
+        if legacy_tokens:
+            if raw_token is None:
+                raw_token = legacy_tokens[0]
+            if len(legacy_tokens) > 1 and reference_token is None:
+                reference_token = legacy_tokens[1]
+
+        if "raw_token" in legacy_kwargs and raw_token is None:
+            raw_token = legacy_kwargs.pop("raw_token")
+        if "reference_token" in legacy_kwargs and reference_token is None:
+            reference_token = legacy_kwargs.pop("reference_token")
+        legacy_kwargs.clear()
 
         candidates = [value]
         for div in (10.0, 100.0, 1000.0, 10000.0):
