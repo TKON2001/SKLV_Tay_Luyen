@@ -1129,113 +1129,75 @@ class AutoRefineApp:
 
         return None
 
-    def ensure_unchecked(self, lock_pos: list[int] | tuple[int, int], *, force: bool = False, stat_index: int | None = None) -> bool:
-        """Đảm bảo ô khóa được bỏ tích.
+    def ensure_unchecked(
+        self,
+        lock_pos: list[int] | tuple[int, int],
+        *,
+        force: bool = False,
+        stat_index: int | None = None,
+    ) -> bool:
+        """Đảm bảo ô khóa được bỏ tích chỉ với một lượt kiểm tra/nhấp chuột."""
 
-        Khi ``force`` được bật, hàm sẽ cố gắng click bỏ tích ngay cả khi hệ thống
-        nhận diện rằng ô đã bỏ tích (dùng cho trường hợp nhận diện bị sai màu).
-        """
         try:
-            # Đảm bảo cửa sổ game đang active để click có tác dụng
             try:
                 if self.game_window:
                     self.game_window.activate()
-                    time.sleep(0.2)
+                    time.sleep(0.15)
             except Exception:
                 pass
 
             x, y = int(lock_pos[0]), int(lock_pos[1])
 
-            # Kiểm tra trạng thái ban đầu
-            if not force and not self.is_lock_checked(lock_pos, stat_index=stat_index):
-                self.log(f"   ✅ Lock {lock_pos} đã ở trạng thái bỏ tích")
-                return True
-            elif force:
+            if not force:
+                is_checked = self.is_lock_checked(lock_pos, stat_index=stat_index)
+                if not is_checked:
+                    self.log(f"   ✅ Lock {lock_pos} đang bỏ tích - bỏ qua")
+                    return True
+            else:
                 self.log(f"   🔁 Force bỏ tích Lock {lock_pos} bất kể trạng thái nhận diện")
 
-            # Thử click với vài vị trí lân cận để tăng độ chính xác
-            click_positions = [
-                (x, y),           # Vị trí chính xác
-                (x+1, y),         # Lệch phải 1px
-                (x, y+1),         # Lệch xuống 1px
-                (x-1, y-1),       # Lệch chéo
-            ]
-            
-            for attempt in range(3):  # Rút ngắn số lần thử để thao tác nhanh hơn
-                self.log(f"   Thử bỏ tích lần {attempt + 1}/3...")
-                
-                for offset_x, offset_y in click_positions:
-                    try:
-                        # Click với vị trí offset
-                        pyautogui.moveTo(offset_x, offset_y)
-                        time.sleep(0.12) # Chờ trước khi click
-                        pyautogui.click(offset_x, offset_y)
-                        time.sleep(0.35)  # Chờ UI cập nhật
-                        
-                        # Kiểm tra kết quả (đọc hai lần để chống nhiễu)
-                        unchecked_1 = not self.is_lock_checked(lock_pos, stat_index=stat_index)
-                        time.sleep(0.12)
-                        unchecked_2 = not self.is_lock_checked(lock_pos, stat_index=stat_index)
-                        if unchecked_1 and unchecked_2:
-                            self.log(f"   ✅ Đã bỏ tích thành công Lock {lock_pos}")
-                            return True
-                            
-                    except FailSafeException:
-                        raise
-                    except Exception as e:
-                        self.log(f"   ⚠️ Lỗi khi click Lock {lock_pos}: {e}")
-                        continue
-                
-                # Nếu vẫn chưa bỏ tích được, thử click mạnh hơn
-                if attempt < 2:
-                    time.sleep(0.25)
-                    try:
-                        # Double click để chắc chắn
-                        pyautogui.doubleClick(x, y)
-                        time.sleep(0.25)
-                        unchecked_1 = not self.is_lock_checked(lock_pos, stat_index=stat_index)
-                        time.sleep(0.1)
-                        unchecked_2 = not self.is_lock_checked(lock_pos, stat_index=stat_index)
-                        if unchecked_1 and unchecked_2:
-                            self.log(f"   ✅ Đã bỏ tích bằng double click Lock {lock_pos}")
-                            return True
-                    except FailSafeException:
-                        raise
-                    except Exception:
-                        pass
-            
-            # Kiểm tra lần cuối
-            final_check_1 = not self.is_lock_checked(lock_pos, stat_index=stat_index)
-            time.sleep(0.12)
-            final_check_2 = not self.is_lock_checked(lock_pos, stat_index=stat_index)
-            final_check = final_check_1 and final_check_2
-            if final_check:
-                self.log(f"   ✅ Cuối cùng đã bỏ tích Lock {lock_pos}")
+            def _click(action_name: str, click_callable) -> bool:
+                try:
+                    pyautogui.moveTo(x, y)
+                    time.sleep(0.08)
+                    click_callable(x, y)
+                    time.sleep(0.28)
+                    if not self.is_lock_checked(lock_pos, stat_index=stat_index):
+                        self.log(f"   ✅ Đã bỏ tích Lock {lock_pos} bằng {action_name}")
+                        return True
+                    return False
+                except FailSafeException:
+                    raise
+                except Exception as exc:
+                    self.log(f"   ⚠️ Lỗi khi thao tác {action_name} Lock {lock_pos}: {exc}")
+                    return False
+
+            if _click("click", pyautogui.click):
                 return True
-            else:
-                self.log(f"   ❌ Không thể bỏ tích Lock {lock_pos} sau 3 lần thử")
-                return False
+
+            if _click("double click", pyautogui.doubleClick):
+                return True
+
+            self.log(f"   ❌ Không thể bỏ tích Lock {lock_pos} sau khi thử một lượt")
+            return False
 
         except FailSafeException:
             raise
-        except Exception as e:
-            self.log(f"   ❌ Lỗi trong ensure_unchecked: {e}")
+        except Exception as exc:
+            self.log(f"   ❌ Lỗi trong ensure_unchecked: {exc}")
             return False
 
     def unlock_all_locks(
         self,
-        max_attempts: int = 5,
+        max_attempts: int = 1,
         *,
         force_click: bool = False,
         target_indices: list[int] | None = None,
     ) -> bool:
-        """Bỏ tích các ô khóa được chỉ định.
+        """Bỏ tích các ô khóa theo cơ chế một lần kiểm tra cho mỗi chỉ số."""
 
-        ``force_click`` cho phép bỏ qua nhận diện ban đầu và click bắt buộc để
-        xử lý các trường hợp OCR màu bị sai. ``target_indices`` cho phép giới
-        hạn danh sách chỉ số cần thao tác (mặc định là tất cả các chỉ số có cấu
-        hình nút khóa).
-        """
+        # ``max_attempts`` được giữ lại để tương thích với cấu hình cũ nhưng
+        # logic mới luôn thực hiện đúng một lượt kiểm tra cho mỗi dòng.
 
         if target_indices is None:
             indices = list(range(len(self.config["stats"])))
@@ -1250,39 +1212,29 @@ class AutoRefineApp:
             if sum(lock_pos) == 0:
                 continue
 
-            if force_click:
+            if force_click or self.is_lock_checked(lock_pos, stat_index=idx):
                 pending.append((idx, lock_pos))
-            else:
-                if self.is_lock_checked(lock_pos, stat_index=idx):
-                    pending.append((idx, lock_pos))
 
         if not pending:
-            # Không có ô nào cần bỏ tích
             return True
 
-        self.log("🔄 Đang bỏ tích các ô khóa...")
+        self.log("🔄 Đang bỏ tích các ô khóa (kiểm tra một lần mỗi dòng)...")
 
-        for attempt in range(max_attempts):
-            self.log(f"   Lần thử bỏ tích: {attempt + 1}/{max_attempts}")
-            next_pending: list[tuple[int, list[int] | tuple[int, int]]] = []
+        failures: list[tuple[int, list[int] | tuple[int, int]]] = []
+        for idx, lock_pos in pending:
+            if self.ensure_unchecked(lock_pos, force=force_click, stat_index=idx):
+                self.locked_stats[idx] = False
+            else:
+                failures.append((idx, lock_pos))
 
-            for idx, lock_pos in pending:
-                if self.ensure_unchecked(lock_pos, force=force_click, stat_index=idx):
-                    self.locked_stats[idx] = False
-                else:
-                    next_pending.append((idx, lock_pos))
+        if not failures:
+            self.log("✅ Đã bỏ tích xong các dòng cần thiết")
+            return True
 
-            if not next_pending:
-                self.log("✅ Đã bỏ tích thành công các dòng!")
-                return True
-
-            if attempt < max_attempts - 1:
-                self.log(f"   ↻ Còn {len(next_pending)} dòng chưa bỏ tích, thử lại sau 0.6s...")
-                time.sleep(0.6)
-
-            pending = next_pending
-
-        self.log("⚠️ Không thể bỏ tích hết các dòng sau nhiều lần thử.")
+        self.log(
+            "⚠️ Không thể bỏ tích các ô: "
+            + ", ".join(f"#{idx + 1}" for idx, _ in failures)
+        )
         return False
 
     def brute_force_unlock_locks(self, cycles: int = 2, jitter: int = 2) -> bool:
@@ -1528,106 +1480,6 @@ class AutoRefineApp:
             best = -400.0
 
         return best
-
-    def normalize_percent_value(
-        self,
-        value: float,
-        reference: float | None = None,
-        *legacy_tokens: str,
-        raw_token: str | None = None,
-        reference_token: str | None = None,
-        **legacy_kwargs,
-    ) -> float:
-        """Chuẩn hoá giá trị % mà không làm mất 3 chữ số như 224%.
-
-        Nếu ``reference`` được cung cấp (thường là giá trị MAX hoặc CURRENT tương ứng),
-        ưu tiên chọn ứng viên gần ``reference`` nhất. Nếu không có ``reference``, chọn
-        ứng viên nằm trong khoảng [0, 400] với độ lớn lớn nhất để tránh rơi xuống 2 chữ số.
-        """
-
-        # --- Tương thích ngược ---
-        # Các phiên bản cũ có thể truyền đối số vị trí hoặc keyword lạ. Gom các giá trị này
-        # về ``raw_token``/``reference_token`` và bỏ qua phần còn lại để tránh lỗi runtime.
-        if legacy_tokens:
-            if raw_token is None:
-                raw_token = legacy_tokens[0]
-            if len(legacy_tokens) > 1 and reference_token is None:
-                reference_token = legacy_tokens[1]
-
-        if "raw_token" in legacy_kwargs and raw_token is None:
-            raw_token = legacy_kwargs.pop("raw_token")
-        if "reference_token" in legacy_kwargs and reference_token is None:
-            reference_token = legacy_kwargs.pop("reference_token")
-        legacy_kwargs.clear()
-
-        candidates = [value]
-        for div in (10.0, 100.0, 1000.0, 10000.0):
-            candidates.append(value / div)
-
-        if reference is not None:
-            best = min(candidates, key=lambda cand: abs(cand - reference))
-        else:
-            best = None
-
-            # Không có reference: chọn ứng viên trong khoảng hợp lý nhất (0..400)
-            plausible = [cand for cand in candidates if 0 <= cand <= 400]
-            if plausible:
-                best = max(plausible)
-
-        if best is None:
-            best = value
-
-        # Nếu OCR gốc có >=3 chữ số phần nguyên nhưng giá trị hiện tại <100, khôi phục bằng cách nhân 10.
-        integer_digits = self._count_integer_digits_from_token(raw_token)
-        if integer_digits and integer_digits >= 3 and abs(best) < 100:
-            adjusted = best
-            digits = integer_digits
-            while digits >= 3 and abs(adjusted) < 100:
-                adjusted *= 10.0
-                digits -= 1
-            best = adjusted
-
-        ref_digits = self._count_integer_digits_from_token(reference_token)
-        if reference is not None and ref_digits and ref_digits >= 3 and abs(reference) < 100:
-            adjusted_ref = reference
-            digits = ref_digits
-            while digits >= 3 and abs(adjusted_ref) < 100:
-                adjusted_ref *= 10.0
-                digits -= 1
-            # Giữ best gần reference đã điều chỉnh nếu cần
-            scale = adjusted_ref / reference if reference else 1.0
-            if scale not in (0.0, 1.0):
-                best *= scale
-
-        if best > 400:
-            best = 400.0
-        elif best < -400:
-            best = -400.0
-
-        return best
-
-    def normalize_percent_value(self, value: float, reference: float | None = None) -> float:
-        """Chuẩn hoá giá trị % mà không làm mất 3 chữ số như 224%.
-
-        Nếu ``reference`` được cung cấp (thường là giá trị MAX hoặc CURRENT tương ứng),
-        ưu tiên chọn ứng viên gần ``reference`` nhất. Nếu không có ``reference``, chọn
-        ứng viên nằm trong khoảng [0, 400] với độ lớn lớn nhất để tránh rơi xuống 2 chữ số.
-        """
-
-        candidates = [value]
-        for div in (10.0, 100.0, 1000.0, 10000.0):
-            candidates.append(value / div)
-
-        if reference is not None:
-            best = min(candidates, key=lambda cand: abs(cand - reference))
-            return best
-
-        # Không có reference: chọn ứng viên trong khoảng hợp lý nhất (0..400)
-        plausible = [cand for cand in candidates if 0 <= cand <= 400]
-        if plausible:
-            # Ưu tiên giá trị lớn nhất trong khoảng hợp lý để giữ đủ chữ số
-            return max(plausible)
-        return value
 
     def is_read_valid(self, current_value, range_max, is_percent: bool) -> bool:
         if is_percent:
