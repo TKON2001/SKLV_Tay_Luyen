@@ -118,10 +118,42 @@ class AutoRefineApp:
         self.config = {
             "refine_button": [0, 0],
             "stats": [
-                {"name": "Chỉ số 1", "area": [0, 0, 0, 0], "lock_button": [0, 0], "desired_value": 0},
-                {"name": "Chỉ số 2", "area": [0, 0, 0, 0], "lock_button": [0, 0], "desired_value": 0},
-                {"name": "Chỉ số 3", "area": [0, 0, 0, 0], "lock_button": [0, 0], "desired_value": 0},
-                {"name": "Chỉ số 4", "area": [0, 0, 0, 0], "lock_button": [0, 0], "desired_value": 0},
+                {
+                    "name": "Chỉ số 1",
+                    "area": [0, 0, 0, 0],
+                    "lock_button": [0, 0],
+                    "desired_value": 0,
+                    "lock_ocr_area": [0, 0, 0, 0],
+                    "lock_unchecked_keyword": "",
+                    "lock_checked_keyword": "",
+                },
+                {
+                    "name": "Chỉ số 2",
+                    "area": [0, 0, 0, 0],
+                    "lock_button": [0, 0],
+                    "desired_value": 0,
+                    "lock_ocr_area": [0, 0, 0, 0],
+                    "lock_unchecked_keyword": "",
+                    "lock_checked_keyword": "",
+                },
+                {
+                    "name": "Chỉ số 3",
+                    "area": [0, 0, 0, 0],
+                    "lock_button": [0, 0],
+                    "desired_value": 0,
+                    "lock_ocr_area": [0, 0, 0, 0],
+                    "lock_unchecked_keyword": "",
+                    "lock_checked_keyword": "",
+                },
+                {
+                    "name": "Chỉ số 4",
+                    "area": [0, 0, 0, 0],
+                    "lock_button": [0, 0],
+                    "desired_value": 0,
+                    "lock_ocr_area": [0, 0, 0, 0],
+                    "lock_unchecked_keyword": "",
+                    "lock_checked_keyword": "",
+                },
             ],
             "upgrade_area": [0, 0, 0, 0],
             "upgrade_button": [0, 0],
@@ -176,55 +208,96 @@ class AutoRefineApp:
         # 2. Khung thiết lập tọa độ
         coords_frame = ttk.LabelFrame(main_frame, text="2. Thiết Lập Tọa Độ và Chỉ Số Mong Muốn", padding="10")
         coords_frame.pack(fill=tk.X, pady=5)
+        coords_frame.columnconfigure(1, weight=1)
+        coords_frame.columnconfigure(2, weight=1)
 
         # Nút Tẩy Luyện
         ttk.Label(coords_frame, text="Nút Tẩy Luyện:").grid(row=0, column=0, sticky=tk.W, pady=2)
         self.refine_btn_label = ttk.Label(coords_frame, text="Chưa thiết lập")
         self.refine_btn_label.grid(row=0, column=1, sticky=tk.W)
-        ttk.Button(coords_frame, text="Thiết lập", command=lambda: self.setup_coord("refine_button")).grid(row=0, column=2, padx=5)
+        ttk.Button(coords_frame, text="Thiết lập", command=lambda: self.setup_coord("refine_button")).grid(row=0, column=2, sticky=tk.W, padx=6)
+
+        row_idx = 1
 
         # Các chỉ số
+        stats_container = ttk.Frame(coords_frame)
+        stats_container.grid(row=row_idx, column=0, columnspan=3, sticky="ew", pady=(6, 0))
+        stats_container.columnconfigure(0, weight=1)
+        row_idx += 1
+
         self.stat_entries = []
         for i in range(4):
-            ttk.Separator(coords_frame, orient=tk.HORIZONTAL).grid(row=1 + i * 3, columnspan=6, sticky="ew", pady=5)
-            
-            # Tên và giá trị mong muốn
-            ttk.Label(coords_frame, text=f"Chỉ số {i+1}:").grid(row=2 + i * 3, column=0, sticky=tk.W, pady=2)
-            desired_val_entry = ttk.Entry(coords_frame, width=10)
-            desired_val_entry.grid(row=2 + i * 3, column=1, sticky=tk.W)
-            
-            # Vùng đọc chỉ số
-            area_label = ttk.Label(coords_frame, text="Vùng đọc: Chưa đặt")
-            area_label.grid(row=2 + i * 3, column=2, sticky=tk.W, padx=10)
-            ttk.Button(coords_frame, text="Đặt vùng", command=lambda i=i: self.setup_coord("stat_area", i)).grid(row=2 + i * 3, column=3, padx=5)
-            
-            # Nút khóa
-            lock_label = ttk.Label(coords_frame, text="Nút khóa: Chưa đặt")
-            lock_label.grid(row=2 + i * 3, column=4, sticky=tk.W, padx=10)
-            ttk.Button(coords_frame, text="Đặt nút", command=lambda i=i: self.setup_coord("stat_lock", i)).grid(row=2 + i * 3, column=5, padx=5)
-            
-            # Hiển thị giá trị hiện tại
-            current_label = ttk.Label(coords_frame, text="Giá trị hiện tại: --")
-            current_label.grid(row=3 + i * 3, column=0, columnspan=6, sticky=tk.W)
-            
+            stat_frame = ttk.LabelFrame(stats_container, text=f"Chỉ số {i+1}")
+            stat_frame.pack(fill=tk.X, pady=4)
+            for col in range(6):
+                stat_frame.columnconfigure(col, weight=1 if col in (1, 3, 5) else 0)
+
+            ttk.Label(stat_frame, text="Mục tiêu:").grid(row=0, column=0, sticky=tk.W, padx=4, pady=2)
+            desired_val_entry = ttk.Entry(stat_frame, width=10)
+            desired_val_entry.grid(row=0, column=1, sticky=tk.W, padx=2, pady=2)
+
+            current_label = ttk.Label(stat_frame, text="Giá trị hiện tại: --")
+            current_label.grid(row=0, column=2, columnspan=2, sticky=tk.W, padx=4, pady=2)
+
+            lock_status_label = ttk.Label(stat_frame, text="Trạng thái khóa: --")
+            lock_status_label.grid(row=0, column=4, columnspan=2, sticky=tk.W, padx=4, pady=2)
+
+            ttk.Label(stat_frame, text="Vùng đọc:").grid(row=1, column=0, sticky=tk.W, padx=4, pady=2)
+            area_label = ttk.Label(stat_frame, text="Chưa đặt")
+            area_label.grid(row=1, column=1, columnspan=3, sticky=tk.W, padx=2, pady=2)
+            ttk.Button(stat_frame, text="Đặt vùng", command=lambda idx=i: self.setup_coord("stat_area", idx)).grid(row=1, column=4, sticky=tk.W, padx=4, pady=2)
+
+            ttk.Label(stat_frame, text="Nút khóa:").grid(row=2, column=0, sticky=tk.W, padx=4, pady=2)
+            lock_label = ttk.Label(stat_frame, text="Chưa đặt")
+            lock_label.grid(row=2, column=1, columnspan=3, sticky=tk.W, padx=2, pady=2)
+            ttk.Button(stat_frame, text="Đặt nút", command=lambda idx=i: self.setup_coord("stat_lock", idx)).grid(row=2, column=4, sticky=tk.W, padx=4, pady=2)
+
+            ttk.Label(stat_frame, text="Vùng xác nhận:").grid(row=3, column=0, sticky=tk.W, padx=4, pady=2)
+            lock_ocr_label = ttk.Label(stat_frame, text="Chưa đặt")
+            lock_ocr_label.grid(row=3, column=1, columnspan=3, sticky=tk.W, padx=2, pady=2)
+            ttk.Button(stat_frame, text="Đặt vùng", command=lambda idx=i: self.setup_coord("stat_lock_ocr", idx)).grid(row=3, column=4, sticky=tk.W, padx=4, pady=2)
+
+            keyword_frame = ttk.Frame(stat_frame)
+            keyword_frame.grid(row=4, column=0, columnspan=6, sticky="ew", padx=2, pady=(4, 2))
+            for col in range(6):
+                weight = 1 if col in (1, 4) else 0
+                keyword_frame.columnconfigure(col, weight=weight)
+
+            ttk.Label(keyword_frame, text="Bỏ tích:").grid(row=0, column=0, sticky=tk.W, padx=4, pady=2)
+            lock_unchecked_entry = ttk.Entry(keyword_frame, width=18)
+            lock_unchecked_entry.grid(row=0, column=1, sticky=tk.EW, padx=2, pady=2)
+            ttk.Button(keyword_frame, text="Chụp", command=lambda idx=i: self.capture_lock_keyword(idx, checked=False)).grid(row=0, column=2, sticky=tk.W, padx=4, pady=2)
+
+            ttk.Label(keyword_frame, text="Đã khóa:").grid(row=0, column=3, sticky=tk.W, padx=(12, 4), pady=2)
+            lock_checked_entry = ttk.Entry(keyword_frame, width=18)
+            lock_checked_entry.grid(row=0, column=4, sticky=tk.EW, padx=2, pady=2)
+            ttk.Button(keyword_frame, text="Chụp", command=lambda idx=i: self.capture_lock_keyword(idx, checked=True)).grid(row=0, column=5, sticky=tk.W, padx=4, pady=2)
+
             self.stat_entries.append({
                 "desired_value": desired_val_entry,
                 "area_label": area_label,
                 "lock_label": lock_label,
-                "current_label": current_label
+                "lock_ocr_label": lock_ocr_label,
+                "lock_unchecked_entry": lock_unchecked_entry,
+                "lock_checked_entry": lock_checked_entry,
+                "current_label": current_label,
+                "lock_status_label": lock_status_label,
             })
 
-        # Khu vực nhận diện nút Thăng Cấp
-        ttk.Separator(coords_frame, orient=tk.HORIZONTAL).grid(row=14, columnspan=6, sticky="ew", pady=6)
-        ttk.Label(coords_frame, text="Vùng nút Thăng Cấp:").grid(row=15, column=0, sticky=tk.W, pady=2)
+        ttk.Separator(coords_frame, orient=tk.HORIZONTAL).grid(row=row_idx, column=0, columnspan=3, sticky="ew", pady=8)
+        row_idx += 1
+
+        ttk.Label(coords_frame, text="Vùng nút Thăng Cấp:").grid(row=row_idx, column=0, sticky=tk.W, pady=2)
         self.upgrade_area_label = ttk.Label(coords_frame, text="Chưa đặt")
-        self.upgrade_area_label.grid(row=15, column=1, columnspan=3, sticky=tk.W)
-        ttk.Button(coords_frame, text="Đặt vùng thăng cấp", command=lambda: self.setup_coord("upgrade_area")).grid(row=15, column=4, padx=5)
-        
-        ttk.Label(coords_frame, text="Nút Thăng Cấp:").grid(row=16, column=0, sticky=tk.W, pady=2)
+        self.upgrade_area_label.grid(row=row_idx, column=1, sticky=tk.W)
+        ttk.Button(coords_frame, text="Đặt vùng", command=lambda: self.setup_coord("upgrade_area")).grid(row=row_idx, column=2, sticky=tk.W, padx=6)
+        row_idx += 1
+
+        ttk.Label(coords_frame, text="Nút Thăng Cấp:").grid(row=row_idx, column=0, sticky=tk.W, pady=2)
         self.upgrade_btn_label = ttk.Label(coords_frame, text="Chưa đặt")
-        self.upgrade_btn_label.grid(row=16, column=1, sticky=tk.W)
-        ttk.Button(coords_frame, text="Thiết lập", command=lambda: self.setup_coord("upgrade_button")).grid(row=16, column=2, padx=5)
+        self.upgrade_btn_label.grid(row=row_idx, column=1, sticky=tk.W)
+        ttk.Button(coords_frame, text="Thiết lập", command=lambda: self.setup_coord("upgrade_button")).grid(row=row_idx, column=2, sticky=tk.W, padx=6)
+        row_idx += 1
 
         # 3. Khung điều khiển
         control_frame = ttk.LabelFrame(main_frame, text="3. Điều Khiển", padding="10")
@@ -240,15 +313,6 @@ class AutoRefineApp:
         
         # Checkbox: Bắt buộc chữ đỏ
         ttk.Checkbutton(control_frame, text="Bắt buộc chữ đỏ", variable=self.require_red_var, command=self.save_config).pack(side=tk.LEFT, padx=10)
-
-        # 3b. Khung lấy mẫu ô khóa
-        tpl_frame = ttk.LabelFrame(main_frame, text="Mẫu Ô Khóa (Template)", padding="10")
-        tpl_frame.pack(fill=tk.X, pady=5)
-        ttk.Label(tpl_frame, text="Hướng dẫn: Di chuyển chuột vào giữa ô khóa, trạng thái tương ứng và nhấn F8").pack(anchor=tk.W)
-        btns = ttk.Frame(tpl_frame)
-        btns.pack(fill=tk.X, pady=4)
-        ttk.Button(btns, text="Lấy mẫu: ĐÃ TÍCH", command=lambda: self.capture_lock_template(True)).pack(side=tk.LEFT, padx=6)
-        ttk.Button(btns, text="Lấy mẫu: CHƯA TÍCH", command=lambda: self.capture_lock_template(False)).pack(side=tk.LEFT, padx=6)
 
         # 4. Khung log
         log_frame = ttk.LabelFrame(main_frame, text="Log", padding="10")
@@ -319,6 +383,12 @@ class AutoRefineApp:
             msg = f"Thiết lập vùng cho Chỉ số {index+1}:\n1. Di chuyển chuột đến GÓC TRÊN-TRÁI của vùng chỉ số và nhấn F8.\n2. Di chuyển chuột đến GÓC DƯỚI-PHẢI và nhấn F8 lần nữa."
         elif coord_type == "stat_lock":
             msg = f"Di chuyển chuột đến NÚT KHÓA của Chỉ số {index+1} và nhấn F8"
+        elif coord_type == "stat_lock_ocr":
+            msg = (
+                f"Thiết lập vùng xác nhận khóa của Chỉ số {index+1}:\n"
+                "1. Di chuyển chuột đến GÓC TRÊN-TRÁI của dòng chữ xác nhận và nhấn F8.\n"
+                "2. Di chuyển chuột đến GÓC DƯỚI-PHẢI và nhấn F8 lần nữa."
+            )
         elif coord_type == "upgrade_area":
             msg = "Thiết lập vùng nhận diện chữ 'Thăng cấp':\n1. Di chuyển chuột đến GÓC TRÊN-TRÁI của vùng nút/chữ và nhấn F8.\n2. Di chuyển chuột đến GÓC DƯỚI-PHẢI và nhấn F8 lần nữa."
         elif coord_type == "upgrade_button":
@@ -338,8 +408,8 @@ class AutoRefineApp:
                 pos = pyautogui.position()
                 positions.append(pos)
                 self.log(f"Đã ghi nhận tọa độ: {pos}")
-                if (coord_type == "stat_area" and len(positions) == 2) or \
-                   (coord_type != "stat_area" and len(positions) == 1):
+                needs_box = coord_type in {"stat_area", "stat_lock_ocr", "upgrade_area"}
+                if (needs_box and len(positions) == 2) or (not needs_box and len(positions) == 1):
                     keyboard.unhook_all()
                     info_window.destroy()
 
@@ -355,11 +425,18 @@ class AutoRefineApp:
             x2, y2 = positions[1]
             area = [min(x1, x2), min(y1, y2), abs(x2-x1), abs(y2-y1)]
             self.config["stats"][index]["area"] = area
-            self.stat_entries[index]["area_label"].config(text=f"Vùng đọc: Đã đặt ({area[2]}x{area[3]})")
+            self.stat_entries[index]["area_label"].config(text=f"Đã đặt ({area[2]}x{area[3]})")
             self.save_config()
         elif coord_type == "stat_lock" and positions:
             self.config["stats"][index]["lock_button"] = list(positions[0])
-            self.stat_entries[index]["lock_label"].config(text=f"Nút khóa: Đã đặt")
+            self.stat_entries[index]["lock_label"].config(text=f"X={positions[0][0]}, Y={positions[0][1]}")
+            self.save_config()
+        elif coord_type == "stat_lock_ocr" and len(positions) == 2:
+            x1, y1 = positions[0]
+            x2, y2 = positions[1]
+            area = [min(x1, x2), min(y1, y2), abs(x2-x1), abs(y2-y1)]
+            self.config["stats"][index]["lock_ocr_area"] = area
+            self.stat_entries[index]["lock_ocr_label"].config(text=f"Đã đặt ({area[2]}x{area[3]})")
             self.save_config()
         elif coord_type == "upgrade_area" and len(positions) == 2:
             x1, y1 = positions[0]
@@ -373,11 +450,129 @@ class AutoRefineApp:
             self.upgrade_btn_label.config(text=f"X={positions[0][0]}, Y={positions[0][1]}")
             self.save_config()
 
+    def _sync_stat_entries_to_config(self, *, strict: bool = False) -> bool:
+        """Đồng bộ các ô nhập liệu của chỉ số vào cấu hình nội bộ.
+
+        Khi ``strict`` được bật, nếu người dùng nhập giá trị mong muốn không hợp lệ
+        thì hàm sẽ hiển thị thông báo lỗi và trả về ``False`` để caller xử lý.
+        """
+
+        for i, stat in enumerate(self.config.get("stats", [])):
+            entries = self.stat_entries[i]
+
+            # Đồng bộ desired value
+            desired_text = entries["desired_value"].get().strip()
+            if desired_text:
+                try:
+                    stat["desired_value"] = int(desired_text)
+                except ValueError:
+                    if strict:
+                        messagebox.showerror("Lỗi", f"Giá trị mong muốn của Chỉ số {i+1} không hợp lệ!")
+                        return False
+            else:
+                stat["desired_value"] = 0
+
+            # Đồng bộ từ khóa OCR
+            stat["lock_unchecked_keyword"] = entries["lock_unchecked_entry"].get().strip()
+            stat["lock_checked_keyword"] = entries["lock_checked_entry"].get().strip()
+
+        return True
+
+    @staticmethod
+    def _normalize_text(text: str) -> str:
+        if not text:
+            return ""
+        normalized = unicodedata.normalize('NFD', text)
+        normalized = ''.join(ch for ch in normalized if unicodedata.category(ch) != 'Mn')
+        normalized = normalized.upper()
+        normalized = re.sub(r'[^0-9A-Z%+\-]+', ' ', normalized)
+        return re.sub(r'\s+', ' ', normalized).strip()
+
+    def capture_lock_keyword(self, stat_index: int, *, checked: bool) -> None:
+        if not (0 <= stat_index < len(self.config.get("stats", []))):
+            return
+
+        stat_cfg = self.config["stats"][stat_index]
+        area = stat_cfg.get("lock_ocr_area", [0, 0, 0, 0])
+        if sum(area) == 0:
+            messagebox.showerror(
+                "Lỗi",
+                f"Vui lòng đặt vùng xác nhận khóa cho Chỉ số {stat_index + 1} trước khi lấy OCR!",
+            )
+            return
+
+        try:
+            ax, ay, aw, ah = map(int, area)
+            if aw <= 0 or ah <= 0:
+                raise ValueError("Kích thước vùng không hợp lệ")
+        except Exception:
+            messagebox.showerror(
+                "Lỗi",
+                f"Vùng xác nhận khóa của Chỉ số {stat_index + 1} không hợp lệ, vui lòng đặt lại!",
+            )
+            return
+
+        try:
+            snap = pyautogui.screenshot(region=(ax, ay, aw, ah))
+        except Exception as exc:
+            self.log(f"❌ Không thể chụp vùng OCR khóa: {exc}")
+            messagebox.showerror("Lỗi", f"Không thể chụp vùng OCR khóa: {exc}")
+            return
+
+        processed = self.process_image_for_ocr(snap)
+        debug_tag = f"lock_{stat_index + 1}_{'checked' if checked else 'unchecked'}"
+        try:
+            processed.save(f"debug_{debug_tag}.png")
+        except Exception:
+            pass
+
+        text = self.ocr_read_text(processed, debug_tag=debug_tag)
+        cleaned = text.strip()
+        if not cleaned:
+            self.log(f"⚠️ Không đọc được văn bản OCR cho Chỉ số {stat_index + 1}.")
+            messagebox.showwarning(
+                "Cảnh báo",
+                f"Không đọc được văn bản OCR cho Chỉ số {stat_index + 1}. Vui lòng thử lại.",
+            )
+            return
+
+        entry_key = "lock_checked_entry" if checked else "lock_unchecked_entry"
+        entry = self.stat_entries[stat_index][entry_key]
+        entry.delete(0, tk.END)
+        entry.insert(0, cleaned)
+
+        self.save_config()
+
+        state_label = "đã khóa" if checked else "bỏ tích"
+        self.log(f"✅ Đã ghi nhận mẫu OCR {state_label} cho Chỉ số {stat_index + 1}: '{cleaned}'")
+
+    def _update_lock_status_label(self, stat_index: int | None, status: bool | None, source: str) -> None:
+        if stat_index is None or not (0 <= stat_index < len(self.stat_entries)):
+            return
+
+        label = self.stat_entries[stat_index]["lock_status_label"]
+        if status is None:
+            text = f"Trạng thái khóa: {source}"
+        else:
+            state_txt = "ĐÃ TÍCH" if status else "CHƯA TÍCH"
+            if source:
+                text = f"Trạng thái khóa: {state_txt} ({source})"
+            else:
+                text = f"Trạng thái khóa: {state_txt}"
+
+        try:
+            self.root.after(0, lambda txt=text, lbl=label: lbl.config(text=txt))
+        except Exception:
+            try:
+                label.config(text=text)
+            except Exception:
+                pass
+
     def test_ocr(self):
         if not self.game_window:
             messagebox.showerror("Lỗi", "Vui lòng chọn cửa sổ game trước!")
             return
-        
+
         self.log("=== TEST OCR ===")
         for i, stat in enumerate(self.config["stats"]):
             if sum(stat["area"]) == 0:
@@ -394,15 +589,18 @@ class AutoRefineApp:
                 current_value, range_max, is_percent = self.parse_ocr_result(text)
                 if range_max is not None:
                     if is_percent:
-                        self.log(f"Chỉ số {i+1}: '{text.strip()}' -> {current_value:.2f}% / MAX {range_max:.2f}%")
-                        self.stat_entries[i]["current_label"].config(text=f"Hiện tại: {current_value:.2f}% / Max: {range_max:.2f}%")
+                        fmt_current = self.format_percent_value(current_value)
+                        fmt_range = self.format_percent_value(range_max)
+                        self.log(f"Chỉ số {i+1}: '{text.strip()}' -> {fmt_current}% / MAX {fmt_range}%")
+                        self.stat_entries[i]["current_label"].config(text=f"Hiện tại: {fmt_current}% / Max: {fmt_range}%")
                     else:
                         self.log(f"Chỉ số {i+1}: '{text.strip()}' -> {current_value} / MAX {range_max}")
                         self.stat_entries[i]["current_label"].config(text=f"Hiện tại: {current_value} / Max: {range_max}")
                 else:
                     if is_percent:
-                        self.log(f"Chỉ số {i+1}: '{text.strip()}' -> {current_value:.2f}%")
-                        self.stat_entries[i]["current_label"].config(text=f"Giá trị hiện tại: {current_value:.2f}%")
+                        fmt_current = self.format_percent_value(current_value)
+                        self.log(f"Chỉ số {i+1}: '{text.strip()}' -> {fmt_current}%")
+                        self.stat_entries[i]["current_label"].config(text=f"Giá trị hiện tại: {fmt_current}%")
                     else:
                         self.log(f"Chỉ số {i+1}: '{text.strip()}' -> {current_value}")
                         self.stat_entries[i]["current_label"].config(text=f"Giá trị hiện tại: {current_value}")
@@ -410,9 +608,21 @@ class AutoRefineApp:
                 # Lưu ảnh để debug
                 processed_img.save(f"debug_stat_{i+1}.png")
                 self.log(f"Đã lưu ảnh debug: debug_stat_{i+1}.png")
-                
+
             except Exception as e:
                 self.log(f"Lỗi khi đọc chỉ số {i+1}: {e}")
+
+            lock_pos = stat.get("lock_button", [0, 0])
+            if sum(lock_pos) > 0:
+                try:
+                    checked = self.is_lock_checked(lock_pos, stat_index=i)
+                    state_txt = "ĐÃ TÍCH" if checked else "CHƯA TÍCH"
+                    self.log(f"   → Trạng thái khóa {i+1}: {state_txt}")
+                except Exception as exc:
+                    self.log(f"   ⚠️ Không thể xác định trạng thái khóa {i+1}: {exc}")
+                    self._update_lock_status_label(i, None, "Lỗi kiểm tra")
+            else:
+                self._update_lock_status_label(i, None, "Chưa đặt nút khóa")
 
     def process_image_for_ocr(self, img):
         # Chuyển sang ảnh xám
@@ -663,13 +873,65 @@ class AutoRefineApp:
         self.log("❌ Thử thăng cấp nhiều lần nhưng chưa thành công hoàn toàn.")
         return False
 
-    def is_lock_checked(self, lock_pos: list[int] | tuple[int, int]) -> bool:
+    def is_lock_checked(self, lock_pos: list[int] | tuple[int, int], *, stat_index: int | None = None) -> bool:
         # Phân tích hình ảnh của ô khóa để xác định trạng thái: tìm dấu tích vàng
         try:
             lx, ly = int(lock_pos[0]), int(lock_pos[1])
         except Exception:
+            self._update_lock_status_label(stat_index, None, "Chưa đặt nút khóa")
             return False
-        
+
+        stat_cfg = None
+        if stat_index is not None and 0 <= stat_index < len(self.config.get("stats", [])):
+            stat_cfg = self.config["stats"][stat_index]
+        else:
+            for idx, cfg in enumerate(self.config.get("stats", [])):
+                pos = cfg.get("lock_button", [0, 0])
+                try:
+                    if int(pos[0]) == lx and int(pos[1]) == ly:
+                        stat_cfg = cfg
+                        stat_index = idx
+                        break
+                except Exception:
+                    continue
+
+        # Ưu tiên OCR theo vùng xác nhận nếu người dùng cấu hình
+        if stat_cfg:
+            area = stat_cfg.get("lock_ocr_area", [0, 0, 0, 0])
+            unchecked_kw = self._normalize_text(stat_cfg.get("lock_unchecked_keyword", ""))
+            checked_kw = self._normalize_text(stat_cfg.get("lock_checked_keyword", ""))
+            if sum(area) > 0 and (unchecked_kw or checked_kw):
+                try:
+                    ax, ay, aw, ah = map(int, area)
+                    if aw > 0 and ah > 0:
+                        snap_area = pyautogui.screenshot(region=(ax, ay, aw, ah))
+                        processed = self.process_image_for_ocr(snap_area)
+                        debug_tag = None
+                        if stat_index is not None:
+                            debug_tag = f"lock_{stat_index + 1}"
+                        raw_text = self.ocr_read_text(processed, debug_tag=debug_tag)
+                        norm_text = self._normalize_text(raw_text)
+                        if norm_text:
+                            label = f"Lock {stat_index + 1}" if stat_index is not None else f"Lock {lock_pos}"
+                            self.log(f"   OCR {label}: '{raw_text.strip()}' -> {norm_text}")
+                        label_idx = f"khóa {stat_index + 1}" if stat_index is not None else f"khóa {lock_pos}"
+                        if unchecked_kw and unchecked_kw in norm_text:
+                            self.log(f"   ✅ OCR xác nhận {label_idx}: phát hiện từ khóa bỏ tích '{stat_cfg.get('lock_unchecked_keyword', '')}'")
+                            self._update_lock_status_label(stat_index, False, "OCR")
+                            return False
+                        if checked_kw and checked_kw in norm_text:
+                            self.log(f"   🔒 OCR xác nhận {label_idx}: phát hiện từ khóa đã khóa '{stat_cfg.get('lock_checked_keyword', '')}'")
+                            self._update_lock_status_label(stat_index, True, "OCR")
+                            return True
+                        if norm_text:
+                            self._update_lock_status_label(stat_index, None, "OCR không khớp")
+                except Exception as exc:
+                    label_idx = f"khóa {stat_index + 1}" if stat_index is not None else f"khóa {lock_pos}"
+                    self.log(f"   ⚠️ OCR {label_idx}: lỗi nhận diện - {exc}")
+                    self._update_lock_status_label(stat_index, None, "Lỗi OCR")
+            elif sum(area) > 0:
+                self._update_lock_status_label(stat_index, None, "Chưa có từ khóa OCR")
+
         # Vùng chụp đủ lớn để bao phủ hoàn toàn dấu tích vàng
         box_size = 32
         half = box_size // 2
@@ -686,9 +948,11 @@ class AutoRefineApp:
                 # checked ~0.65 trở lên và chênh lệch > 0.10 so với unchecked
                 if sim_checked >= 0.65 and (sim_checked - max(-1.0, sim_unchecked)) >= 0.10:
                     self.log(f"   TEMPLATE Lock {lock_pos}: sim_checked={sim_checked:.3f}, sim_unchecked={sim_unchecked:.3f} => TÍCH")
+                    self._update_lock_status_label(stat_index, True, "Template")
                     return True
                 if sim_unchecked >= 0.65 and (sim_unchecked - max(-1.0, sim_checked)) >= 0.10:
                     self.log(f"   TEMPLATE Lock {lock_pos}: sim_checked={sim_checked:.3f}, sim_unchecked={sim_unchecked:.3f} => TRỐNG")
+                    self._update_lock_status_label(stat_index, False, "Template")
                     return False
                 # Nếu mơ hồ, fallback sang phân tích màu
         except Exception:
@@ -741,10 +1005,11 @@ class AutoRefineApp:
         
         status = "TÍCH" if has_checkmark else "TRỐNG"
         self.log(f"   Kết quả Lock {lock_pos}: {status}")
-        
+        self._update_lock_status_label(stat_index, has_checkmark, "Màu sắc")
+
         return has_checkmark
 
-    def ensure_unchecked(self, lock_pos: list[int] | tuple[int, int], *, force: bool = False) -> bool:
+    def ensure_unchecked(self, lock_pos: list[int] | tuple[int, int], *, force: bool = False, stat_index: int | None = None) -> bool:
         """Đảm bảo ô khóa được bỏ tích.
 
         Khi ``force`` được bật, hàm sẽ cố gắng click bỏ tích ngay cả khi hệ thống
@@ -762,7 +1027,7 @@ class AutoRefineApp:
             x, y = int(lock_pos[0]), int(lock_pos[1])
 
             # Kiểm tra trạng thái ban đầu
-            if not force and not self.is_lock_checked(lock_pos):
+            if not force and not self.is_lock_checked(lock_pos, stat_index=stat_index):
                 self.log(f"   ✅ Lock {lock_pos} đã ở trạng thái bỏ tích")
                 return True
             elif force:
@@ -788,9 +1053,9 @@ class AutoRefineApp:
                         time.sleep(0.35)  # Chờ UI cập nhật
                         
                         # Kiểm tra kết quả (đọc hai lần để chống nhiễu)
-                        unchecked_1 = not self.is_lock_checked(lock_pos)
+                        unchecked_1 = not self.is_lock_checked(lock_pos, stat_index=stat_index)
                         time.sleep(0.12)
-                        unchecked_2 = not self.is_lock_checked(lock_pos)
+                        unchecked_2 = not self.is_lock_checked(lock_pos, stat_index=stat_index)
                         if unchecked_1 and unchecked_2:
                             self.log(f"   ✅ Đã bỏ tích thành công Lock {lock_pos}")
                             return True
@@ -806,9 +1071,9 @@ class AutoRefineApp:
                         # Double click để chắc chắn
                         pyautogui.doubleClick(x, y)
                         time.sleep(0.25)
-                        unchecked_1 = not self.is_lock_checked(lock_pos)
+                        unchecked_1 = not self.is_lock_checked(lock_pos, stat_index=stat_index)
                         time.sleep(0.1)
-                        unchecked_2 = not self.is_lock_checked(lock_pos)
+                        unchecked_2 = not self.is_lock_checked(lock_pos, stat_index=stat_index)
                         if unchecked_1 and unchecked_2:
                             self.log(f"   ✅ Đã bỏ tích bằng double click Lock {lock_pos}")
                             return True
@@ -816,9 +1081,9 @@ class AutoRefineApp:
                         pass
             
             # Kiểm tra lần cuối
-            final_check_1 = not self.is_lock_checked(lock_pos)
+            final_check_1 = not self.is_lock_checked(lock_pos, stat_index=stat_index)
             time.sleep(0.12)
-            final_check_2 = not self.is_lock_checked(lock_pos)
+            final_check_2 = not self.is_lock_checked(lock_pos, stat_index=stat_index)
             final_check = final_check_1 and final_check_2
             if final_check:
                 self.log(f"   ✅ Cuối cùng đã bỏ tích Lock {lock_pos}")
@@ -862,7 +1127,7 @@ class AutoRefineApp:
             if force_click:
                 pending.append((idx, lock_pos))
             else:
-                if self.is_lock_checked(lock_pos):
+                if self.is_lock_checked(lock_pos, stat_index=idx):
                     pending.append((idx, lock_pos))
 
         if not pending:
@@ -876,7 +1141,7 @@ class AutoRefineApp:
             next_pending: list[tuple[int, list[int] | tuple[int, int]]] = []
 
             for idx, lock_pos in pending:
-                if self.ensure_unchecked(lock_pos, force=force_click):
+                if self.ensure_unchecked(lock_pos, force=force_click, stat_index=idx):
                     self.locked_stats[idx] = False
                 else:
                     next_pending.append((idx, lock_pos))
@@ -983,6 +1248,17 @@ class AutoRefineApp:
         }
         s = ''.join(trans.get(ch, ch) for ch in s)
         return s
+
+    @staticmethod
+    def format_percent_value(value) -> str:
+        """Trả về chuỗi hiển thị phần trăm đúng như giá trị OCR thu được."""
+
+        if isinstance(value, (int, float)):
+            text = f"{value}"
+            if isinstance(value, float) and '.' in text:
+                text = text.rstrip('0').rstrip('.')
+            return text
+        return str(value)
 
     def fix_percent_current_with_max(self, current_value: float, range_max: float | None) -> float:
         # Sửa lỗi rơi dấu chấm: 1485 -> 148.5 hoặc 14.85 nếu gần range_max
@@ -1108,8 +1384,11 @@ class AutoRefineApp:
         if range_max is None or (range_max is not None and range_max <= 0):
             return False
         if is_percent:
-            # So sánh theo định dạng hiển thị (2 chữ số thập phân). A phải bằng C sau khi làm tròn 2 số.
-            return round(float(current_value), 2) == round(float(range_max), 2)
+            # So sánh chính xác theo giá trị OCR: chỉ khóa khi A == C tuyệt đối.
+            try:
+                return float(current_value) == float(range_max)
+            except (TypeError, ValueError):
+                return False
         else:
             # Số nguyên: bắt buộc bằng đúng
             return int(current_value) == int(range_max)
@@ -1174,24 +1453,34 @@ class AutoRefineApp:
 
                     if target is not None and target > 0:
                         if is_percent:
-                            self.log(f"   Chỉ số {i+1}: '{text.strip()}' -> {current_value:.2f}% / Mục tiêu {target:.2f}%  => {'ĐẠT' if achieved else 'chưa đạt'}")
+                            fmt_current = self.format_percent_value(current_value)
+                            fmt_target = self.format_percent_value(target)
+                            self.log(
+                                f"   Chỉ số {i+1}: '{text.strip()}' -> {fmt_current}% / Mục tiêu {fmt_target}%  => {'ĐẠT' if achieved else 'chưa đạt'}"
+                            )
                         else:
                             self.log(f"   Chỉ số {i+1}: '{text.strip()}' -> {current_value} / Mục tiêu {target}  => {'ĐẠT' if achieved else 'chưa đạt'}")
                     else:
                         if is_percent:
-                            self.log(f"   Chỉ số {i+1}: '{text.strip()}' -> {current_value:.2f}%")
+                            fmt_current = self.format_percent_value(current_value)
+                            self.log(f"   Chỉ số {i+1}: '{text.strip()}' -> {fmt_current}%")
                         else:
                             self.log(f"   Chỉ số {i+1}: '{text.strip()}' -> {current_value}")
                     
                     # Cập nhật GUI
                     if range_max is not None:
                         if is_percent:
-                            self.root.after(0, lambda i=i, val=current_value, mx=range_max: self.stat_entries[i]["current_label"].config(text=f"Hiện tại: {val:.2f}% / Max: {mx:.2f}%"))
+                            fmt_current = self.format_percent_value(current_value)
+                            fmt_range = self.format_percent_value(range_max)
+                            display_text = f"Hiện tại: {fmt_current}% / Max: {fmt_range}%"
+                            self.root.after(0, lambda i=i, text=display_text: self.stat_entries[i]["current_label"].config(text=text))
                         else:
                             self.root.after(0, lambda i=i, val=current_value, mx=range_max: self.stat_entries[i]["current_label"].config(text=f"Hiện tại: {val} / Max: {mx}"))
                     else:
                         if is_percent:
-                            self.root.after(0, lambda i=i, val=current_value: self.stat_entries[i]["current_label"].config(text=f"Giá trị hiện tại: {val:.2f}%"))
+                            fmt_current = self.format_percent_value(current_value)
+                            display_text = f"Giá trị hiện tại: {fmt_current}%"
+                            self.root.after(0, lambda i=i, text=display_text: self.stat_entries[i]["current_label"].config(text=text))
                         else:
                             self.root.after(0, lambda i=i, val=current_value: self.stat_entries[i]["current_label"].config(text=f"Giá trị hiện tại: {val}"))
 
@@ -1332,21 +1621,11 @@ class AutoRefineApp:
             messagebox.showerror("Lỗi", "Vui lòng thiết lập nút Tẩy Luyện!")
             return
         
-        # Cập nhật giá trị mong muốn từ GUI
-        for i in range(4):
-            try:
-                val_text = self.stat_entries[i]["desired_value"].get()
-                if val_text.strip():
-                    val = int(val_text)
-                    self.config["stats"][i]["desired_value"] = val
-                else:
-                    self.config["stats"][i]["desired_value"] = 0
-            except ValueError:
-                messagebox.showerror("Lỗi", f"Giá trị mong muốn của Chỉ số {i+1} không hợp lệ!")
-                return
-        
+        if not self._sync_stat_entries_to_config(strict=True):
+            return
+
         # Kiểm tra có ít nhất một chỉ số có vùng đọc và nút khóa (không bắt buộc desired_value)
-        has_configured_stats = any(sum(stat["area"]) > 0 and sum(stat["lock_button"]) > 0 
+        has_configured_stats = any(sum(stat["area"]) > 0 and sum(stat["lock_button"]) > 0
                                  for stat in self.config["stats"])
         
         if not has_configured_stats:
@@ -1386,6 +1665,7 @@ class AutoRefineApp:
 
     def save_config(self):
         try:
+            self._sync_stat_entries_to_config(strict=False)
             with open(self.config_file, "w", encoding='utf-8') as f:
                 # đồng bộ require_red từ checkbox
                 self.config["require_red"] = bool(self.require_red_var.get())
@@ -1416,7 +1696,48 @@ class AutoRefineApp:
 
                 # set checkbox trạng thái yêu cầu chữ đỏ
                 self.require_red_var.set(bool(self.config.get("require_red", False)))
-                
+
+                for i, stat in enumerate(self.config.get("stats", [])):
+                    if i >= len(self.stat_entries):
+                        continue
+                    area = stat.get("area", [0, 0, 0, 0])
+                    if sum(area) > 0:
+                        self.stat_entries[i]["area_label"].config(text=f"Đã đặt ({area[2]}x{area[3]})")
+                    else:
+                        self.stat_entries[i]["area_label"].config(text="Chưa đặt")
+
+                    lock_btn = stat.get("lock_button", [0, 0])
+                    if sum(lock_btn) > 0:
+                        self.stat_entries[i]["lock_label"].config(text=f"X={lock_btn[0]}, Y={lock_btn[1]}")
+                    else:
+                        self.stat_entries[i]["lock_label"].config(text="Chưa đặt")
+
+                    lock_area = stat.get("lock_ocr_area", [0, 0, 0, 0])
+                    if sum(lock_area) > 0:
+                        self.stat_entries[i]["lock_ocr_label"].config(text=f"Đã đặt ({lock_area[2]}x{lock_area[3]})")
+                    else:
+                        self.stat_entries[i]["lock_ocr_label"].config(text="Chưa đặt")
+
+                    desired_entry = self.stat_entries[i]["desired_value"]
+                    desired_entry.delete(0, tk.END)
+                    desired_val = stat.get("desired_value", 0)
+                    try:
+                        desired_int = int(desired_val)
+                    except (TypeError, ValueError):
+                        desired_int = 0
+                    if desired_int != 0:
+                        desired_entry.insert(0, str(desired_int))
+
+                    unchecked_entry = self.stat_entries[i]["lock_unchecked_entry"]
+                    unchecked_entry.delete(0, tk.END)
+                    unchecked_entry.insert(0, stat.get("lock_unchecked_keyword", ""))
+
+                    checked_entry = self.stat_entries[i]["lock_checked_entry"]
+                    checked_entry.delete(0, tk.END)
+                    checked_entry.insert(0, stat.get("lock_checked_keyword", ""))
+
+                    self.stat_entries[i]["lock_status_label"].config(text="Trạng thái khóa: --")
+
                 # upgrade button/area labels
                 up_btn = self.config.get("upgrade_button", [0,0])
                 if sum(up_btn) > 0:
@@ -1623,7 +1944,7 @@ class AutoRefineApp:
             for idx in indices:
                 lock_pos = self.config["stats"][idx].get("lock_button", [0, 0])
                 try:
-                    if self.is_lock_checked(lock_pos):
+                    if self.is_lock_checked(lock_pos, stat_index=idx):
                         still_checked.append(idx)
                 except Exception as exc:
                     self.log(f"   ⚠️ Fallback: lỗi khi kiểm tra ô khóa {idx+1}: {exc}")
