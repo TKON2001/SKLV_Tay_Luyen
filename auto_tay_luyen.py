@@ -439,13 +439,6 @@ class AutoRefineApp:
             self.config["stats"][index]["lock_ocr_area"] = area
             self.stat_entries[index]["lock_ocr_label"].config(text=f"Đã đặt ({area[2]}x{area[3]})")
             self.save_config()
-        elif coord_type == "stat_lock_ocr" and len(positions) == 2:
-            x1, y1 = positions[0]
-            x2, y2 = positions[1]
-            area = [min(x1, x2), min(y1, y2), abs(x2-x1), abs(y2-y1)]
-            self.config["stats"][index]["lock_ocr_area"] = area
-            self.stat_entries[index]["lock_ocr_label"].config(text=f"Đã đặt ({area[2]}x{area[3]})")
-            self.save_config()
         elif coord_type == "upgrade_area" and len(positions) == 2:
             x1, y1 = positions[0]
             x2, y2 = positions[1]
@@ -947,6 +940,19 @@ class AutoRefineApp:
         top = max(0, ly - half)
         snap = pyautogui.screenshot(region=(left, top, box_size, box_size))
 
+        # Thử nhận diện trực tiếp dấu chữ V
+        v_state = self._detect_lock_by_checkmark(snap, stat_index=stat_index, lock_pos=lock_pos)
+        if v_state is True:
+            label_idx = f"khóa {stat_index + 1}" if stat_index is not None else f"khóa {lock_pos}"
+            self.log(f"   🔒 Chữ V xác nhận {label_idx} đang ĐÃ KHÓA")
+            self._update_lock_status_label(stat_index, True, "Chữ V")
+            return True
+        if v_state is False:
+            label_idx = f"khóa {stat_index + 1}" if stat_index is not None else f"khóa {lock_pos}"
+            self.log(f"   ✅ Chữ V xác nhận {label_idx} đang BỎ TÍCH")
+            self._update_lock_status_label(stat_index, False, "Chữ V")
+            return False
+
         # Nếu có template, ưu tiên so khớp mẫu
         try:
             if self._tpl_checked is not None or self._tpl_unchecked is not None:
@@ -1016,6 +1022,75 @@ class AutoRefineApp:
         self._update_lock_status_label(stat_index, has_checkmark, "Màu sắc")
 
         return has_checkmark
+
+    def _detect_lock_by_checkmark(
+        self,
+        snap: Image.Image,
+        *,
+        stat_index: int | None = None,
+        lock_pos: tuple[int, int] | list[int] | None = None,
+    ) -> bool | None:
+        """Cố gắng phát hiện chữ V vàng trong ô khóa.
+
+        Trả về ``True`` nếu chắc chắn có chữ V, ``False`` nếu chắc chắn không có,
+        hoặc ``None`` nếu không thể kết luận (để dùng fallback khác).
+        """
+
+        try:
+            w, h = snap.size
+            if w <= 0 or h <= 0:
+                return None
+
+            scale = 3 if max(w, h) < 48 else 2
+            upscaled = snap.resize((w * scale, h * scale), Image.LANCZOS)
+            gray = upscaled.convert("L")
+            enhanced = ImageEnhance.Contrast(gray).enhance(3.0)
+            sharpened = enhanced.filter(ImageFilter.UnsharpMask(radius=2, percent=170, threshold=3))
+            bw = sharpened.point(lambda p: 255 if p > 160 else 0)
+
+            config = "--psm 8 --oem 3 -c tessedit_char_whitelist=Vv"
+            raw_text = pytesseract.image_to_string(bw, lang="eng", config=config)
+            normalized = self._normalize_text(raw_text)
+
+            label_idx = f"khóa {stat_index + 1}" if stat_index is not None else f"lock {lock_pos}"
+
+            tokens = [tok for tok in normalized.split() if tok]
+            if any(tok == "V" for tok in tokens) or normalized == "VV":
+                self.log(f"   DEBUG chữ V {label_idx}: phát hiện trực tiếp '{raw_text.strip()}'")
+                return True
+
+            total_pixels = bw.width * bw.height
+            white_pixels = sum(1 for px in bw.getdata() if px == 255)
+            bright_ratio = white_pixels / total_pixels if total_pixels else 0.0
+
+            diag_hits = 0
+            diag_total = 0
+            tolerance = max(1, int(bw.width * 0.06))
+            for y in range(int(bw.height * 0.25), bw.height):
+                left_expected = int((y / bw.height) * (bw.width / 2))
+                right_expected = bw.width - 1 - left_expected
+                for offset in range(-tolerance, tolerance + 1):
+                    diag_total += 2
+                    lx = left_expected + offset
+                    rx = right_expected + offset
+                    if 0 <= lx < bw.width and bw.getpixel((lx, y)) == 255:
+                        diag_hits += 1
+                    if 0 <= rx < bw.width and bw.getpixel((rx, y)) == 255:
+                        diag_hits += 1
+
+            diag_score = diag_hits / diag_total if diag_total else 0.0
+            self.log(
+                f"   DEBUG chữ V {label_idx}: bright_ratio={bright_ratio:.3f}, diag_score={diag_score:.3f}, raw='{raw_text.strip()}'"
+            )
+
+            if bright_ratio <= 0.010 and diag_score <= 0.060:
+                return False
+            if bright_ratio >= 0.045 or diag_score >= 0.180:
+                return True
+        except Exception as exc:
+            self.log(f"   ⚠️ Nhận diện chữ V lỗi: {exc}")
+
+        return None
 
     def ensure_unchecked(self, lock_pos: list[int] | tuple[int, int], *, force: bool = False, stat_index: int | None = None) -> bool:
         """Đảm bảo ô khóa được bỏ tích.
@@ -1269,10 +1344,15 @@ class AutoRefineApp:
         return str(value)
 
     def fix_percent_current_with_max(self, current_value: float, range_max: float | None) -> float:
-        # Sửa lỗi rơi dấu chấm: 1485 -> 148.5 hoặc 14.85 nếu gần range_max
+        """Thử khôi phục dấu chấm bị mất dựa trên range_max."""
+
         if range_max is None:
             return current_value
-        candidates = [current_value, current_value / 10.0, current_value / 100.0]
+
+        candidates = [current_value]
+        for div in (10.0, 100.0, 1000.0):
+            candidates.append(current_value / div)
+
         best = current_value
         best_delta = abs(current_value - range_max)
         for c in candidates:
@@ -1282,10 +1362,33 @@ class AutoRefineApp:
                 best = c
         return best
 
+    def normalize_percent_value(self, value: float, reference: float | None = None) -> float:
+        """Chuẩn hoá giá trị % mà không làm mất 3 chữ số như 224%.
+
+        Nếu ``reference`` được cung cấp (thường là giá trị MAX hoặc CURRENT tương ứng),
+        ưu tiên chọn ứng viên gần ``reference`` nhất. Nếu không có ``reference``, chọn
+        ứng viên nằm trong khoảng [0, 400] với độ lớn lớn nhất để tránh rơi xuống 2 chữ số.
+        """
+
+        candidates = [value]
+        for div in (10.0, 100.0, 1000.0, 10000.0):
+            candidates.append(value / div)
+
+        if reference is not None:
+            best = min(candidates, key=lambda cand: abs(cand - reference))
+            return best
+
+        # Không có reference: chọn ứng viên trong khoảng hợp lý nhất (0..400)
+        plausible = [cand for cand in candidates if 0 <= cand <= 400]
+        if plausible:
+            # Ưu tiên giá trị lớn nhất trong khoảng hợp lý để giữ đủ chữ số
+            return max(plausible)
+        return value
+
     def is_read_valid(self, current_value, range_max, is_percent: bool) -> bool:
         if is_percent:
-            # Giá trị % hợp lệ trong [0, 200]
-            if current_value < 0 or current_value > 200:
+            # Cho phép chỉ số % lên tới 400 để không làm mất 3 chữ số như 224%
+            if current_value < 0 or current_value > 400:
                 return False
             if range_max is not None and current_value > range_max * 1.5 + 1:
                 return False
@@ -1355,25 +1458,16 @@ class AutoRefineApp:
             else:
                 return (0.0 if is_percent else 0), None, is_percent
 
-        # Sanity cho phần trăm: đưa về khoảng 0..200 nếu OCR dính thừa chữ số (ví dụ 19604 -> 196.04)
-        def normalize_percent(x: float) -> float:
-            val = x
-            # Nếu quá lớn, chia 10 cho đến khi <= 200 hoặc 2 lần
-            for _ in range(3):
-                if val <= 200:
-                    break
-                val = val / 10.0
-            return val
-
+        # Sanity cho phần trăm: phục hồi giá trị thực nếu OCR dính thừa chữ số (ví dụ 19604 -> 196.04)
         # Đồng bộ kiểu dữ liệu current/range_max
         if is_percent:
             if isinstance(current_value, int):
                 current_value = float(current_value)
             if isinstance(range_max, int):
                 range_max = float(range_max)
-            current_value = normalize_percent(current_value)
+            current_value = self.normalize_percent_value(current_value, range_max)
             if range_max is not None:
-                range_max = normalize_percent(range_max)
+                range_max = self.normalize_percent_value(range_max, current_value)
             # Sửa lỗi rơi dấu chấm nếu lệch xa max
             current_value = self.fix_percent_current_with_max(current_value, range_max)
         else:
