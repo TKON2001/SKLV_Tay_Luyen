@@ -15,6 +15,13 @@ import sys
 import unicodedata
 import colorsys
 import math
+
+try:
+    from pyautogui import FailSafeException  # type: ignore
+except Exception:  # pragma: no cover - fallback khi không có pyautogui thật
+    class FailSafeException(Exception):
+        """Stub FailSafeException khi pyautogui không sẵn có."""
+
 try:
     import numpy as np
 except Exception:
@@ -529,23 +536,49 @@ class AutoRefineApp:
 
         text = self.ocr_read_text(processed, debug_tag=debug_tag)
         cleaned = text.strip()
-        if not cleaned:
-            self.log(f"⚠️ Không đọc được văn bản OCR cho Chỉ số {stat_index + 1}.")
-            messagebox.showwarning(
-                "Cảnh báo",
-                f"Không đọc được văn bản OCR cho Chỉ số {stat_index + 1}. Vui lòng thử lại.",
-            )
-            return
+        normalized = self._normalize_text(cleaned)
 
         entry_key = "lock_checked_entry" if checked else "lock_unchecked_entry"
         entry = self.stat_entries[stat_index][entry_key]
+
+        if checked:
+            if 'V' not in normalized:
+                self.log(
+                    f"⚠️ Không phát hiện chữ V trong vùng khóa của Chỉ số {stat_index + 1}."
+                )
+                messagebox.showwarning(
+                    "Cảnh báo",
+                    "Không phát hiện được chữ V trong vùng đã khóa. Vui lòng đảm bảo ô khóa có dấu V và vùng chụp đủ lớn.",
+                )
+                return
+            entry_value = 'V'
+        else:
+            if 'V' in normalized:
+                self.log(
+                    f"⚠️ Vẫn còn chữ V trong vùng bỏ tích của Chỉ số {stat_index + 1}."
+                )
+                messagebox.showwarning(
+                    "Cảnh báo",
+                    "Ô khóa vẫn còn chữ V. Vui lòng bỏ tích trước khi chụp mẫu bỏ tích.",
+                )
+                return
+            # Cho phép OCR trống đối với trạng thái bỏ tích
+            entry_value = ''
+            if not cleaned:
+                self.log(
+                    f"ℹ️ Vùng bỏ tích của Chỉ số {stat_index + 1} không có chữ – dùng mẫu trống."
+                )
+
         entry.delete(0, tk.END)
-        entry.insert(0, cleaned)
+        entry.insert(0, entry_value)
 
         self.save_config()
 
         state_label = "đã khóa" if checked else "bỏ tích"
-        self.log(f"✅ Đã ghi nhận mẫu OCR {state_label} cho Chỉ số {stat_index + 1}: '{cleaned}'")
+        display_text = entry_value or '(trống)'
+        self.log(
+            f"✅ Đã ghi nhận mẫu OCR {state_label} cho Chỉ số {stat_index + 1}: '{display_text}'"
+        )
 
     def _update_lock_status_label(self, stat_index: int | None, status: bool | None, source: str) -> None:
         if stat_index is None or not (0 <= stat_index < len(self.stat_entries)):
@@ -799,6 +832,8 @@ class AutoRefineApp:
                 pyautogui.moveTo(bx, by)
                 pyautogui.click(bx, by)
                 return True, (bx, by), "preset"
+            except FailSafeException:
+                raise
             except Exception as exc:
                 self.log(f"   ⚠️ Lỗi click nút Thăng Cấp preset: {exc}")
 
@@ -810,6 +845,8 @@ class AutoRefineApp:
                 pyautogui.click(hx, hy)
                 method = "hotspot" if info.get("active") else "center"
                 return True, (hx, hy), method
+            except FailSafeException:
+                raise
             except Exception as exc:
                 self.log(f"   ⚠️ Lỗi click hotspot Thăng Cấp: {exc}")
 
@@ -1143,6 +1180,8 @@ class AutoRefineApp:
                             self.log(f"   ✅ Đã bỏ tích thành công Lock {lock_pos}")
                             return True
                             
+                    except FailSafeException:
+                        raise
                     except Exception as e:
                         self.log(f"   ⚠️ Lỗi khi click Lock {lock_pos}: {e}")
                         continue
@@ -1160,6 +1199,8 @@ class AutoRefineApp:
                         if unchecked_1 and unchecked_2:
                             self.log(f"   ✅ Đã bỏ tích bằng double click Lock {lock_pos}")
                             return True
+                    except FailSafeException:
+                        raise
                     except Exception:
                         pass
             
@@ -1175,6 +1216,8 @@ class AutoRefineApp:
                 self.log(f"   ❌ Không thể bỏ tích Lock {lock_pos} sau 3 lần thử")
                 return False
 
+        except FailSafeException:
+            raise
         except Exception as e:
             self.log(f"   ❌ Lỗi trong ensure_unchecked: {e}")
             return False
@@ -1297,10 +1340,14 @@ class AutoRefineApp:
                         time.sleep(0.05)
                         pyautogui.click(px, py)
                         time.sleep(0.08)
+                    except FailSafeException:
+                        raise
                     except Exception as exc:
                         self.log(f"      ⚠️ Bruteforce: lỗi click ô khóa {idx+1}: {exc}")
                 try:
                     pyautogui.doubleClick(x, y)
+                except FailSafeException:
+                    raise
                 except Exception:
                     pass
                 time.sleep(0.12)
@@ -1317,7 +1364,7 @@ class AutoRefineApp:
 
     def clean_ocr_text(self, text: str) -> str:
         # Làm sạch một số lỗi OCR phổ biến
-        s = text
+        s = unicodedata.normalize('NFKC', text)
         s = s.replace(',', '.')
         s = s.replace(' ', '')
         s = s.replace('–', '-')
@@ -1343,6 +1390,30 @@ class AutoRefineApp:
             return text
         return str(value)
 
+    @staticmethod
+    def _count_integer_digits_from_token(token: str | None) -> int | None:
+        """Đếm số chữ số phần nguyên trong chuỗi OCR ban đầu."""
+
+        if not token:
+            return None
+
+        normalized = unicodedata.normalize('NFKC', token)
+        normalized = normalized.replace(',', '.')
+        match = re.search(r'-?\d+(?:\.\d+)?', normalized)
+        if not match:
+            return None
+
+        number_part = match.group(0)
+        if '.' in number_part:
+            integer_part = number_part.split('.')[0]
+        else:
+            integer_part = number_part
+
+        integer_part = integer_part.lstrip('0')
+        if not integer_part:
+            integer_part = '0'
+        return len(integer_part)
+
     def fix_percent_current_with_max(self, current_value: float, range_max: float | None) -> float:
         """Thử khôi phục dấu chấm bị mất dựa trên range_max."""
 
@@ -1360,6 +1431,72 @@ class AutoRefineApp:
             if delta < best_delta:
                 best_delta = delta
                 best = c
+        if best > 400:
+            best = 400.0
+        elif best < -400:
+            best = -400.0
+
+        return best
+
+    def normalize_percent_value(
+        self,
+        value: float,
+        reference: float | None = None,
+        *,
+        raw_token: str | None = None,
+        reference_token: str | None = None,
+    ) -> float:
+        """Chuẩn hoá giá trị % mà không làm mất 3 chữ số như 224%.
+
+        Nếu ``reference`` được cung cấp (thường là giá trị MAX hoặc CURRENT tương ứng),
+        ưu tiên chọn ứng viên gần ``reference`` nhất. Nếu không có ``reference``, chọn
+        ứng viên nằm trong khoảng [0, 400] với độ lớn lớn nhất để tránh rơi xuống 2 chữ số.
+        """
+
+        candidates = [value]
+        for div in (10.0, 100.0, 1000.0, 10000.0):
+            candidates.append(value / div)
+
+        if reference is not None:
+            best = min(candidates, key=lambda cand: abs(cand - reference))
+        else:
+            best = None
+
+            # Không có reference: chọn ứng viên trong khoảng hợp lý nhất (0..400)
+            plausible = [cand for cand in candidates if 0 <= cand <= 400]
+            if plausible:
+                best = max(plausible)
+
+        if best is None:
+            best = value
+
+        # Nếu OCR gốc có >=3 chữ số phần nguyên nhưng giá trị hiện tại <100, khôi phục bằng cách nhân 10.
+        integer_digits = self._count_integer_digits_from_token(raw_token)
+        if integer_digits and integer_digits >= 3 and abs(best) < 100:
+            adjusted = best
+            digits = integer_digits
+            while digits >= 3 and abs(adjusted) < 100:
+                adjusted *= 10.0
+                digits -= 1
+            best = adjusted
+
+        ref_digits = self._count_integer_digits_from_token(reference_token)
+        if reference is not None and ref_digits and ref_digits >= 3 and abs(reference) < 100:
+            adjusted_ref = reference
+            digits = ref_digits
+            while digits >= 3 and abs(adjusted_ref) < 100:
+                adjusted_ref *= 10.0
+                digits -= 1
+            # Giữ best gần reference đã điều chỉnh nếu cần
+            scale = adjusted_ref / reference if reference else 1.0
+            if scale not in (0.0, 1.0):
+                best *= scale
+
+        if best > 400:
+            best = 400.0
+        elif best < -400:
+            best = -400.0
+
         return best
 
     def normalize_percent_value(self, value: float, reference: float | None = None) -> float:
@@ -1411,6 +1548,7 @@ class AutoRefineApp:
         cleaned = cleaned.replace('–', '-')
 
         range_max = None
+        range_raw_token = None
         is_percent = '%' in cleaned
 
         # 1) Tìm cặp min-max dạng phần trăm trong ngoặc: (a%-b%)
@@ -1421,6 +1559,7 @@ class AutoRefineApp:
                 b = float(pm.group(2))
                 range_max = max(a, b)
                 is_percent = True
+                range_raw_token = pm.group(2) if b >= a else pm.group(1)
             except:
                 range_max = None
         else:
@@ -1431,20 +1570,24 @@ class AutoRefineApp:
                     a = int(nm.group(1))
                     b = int(nm.group(2))
                     range_max = max(a, b)
+                    range_raw_token = nm.group(2) if b >= a else nm.group(1)
                 except:
                     range_max = None
 
         # 2) Lấy số sau dấu '+' dạng phần trăm: +x.x%
         plus_percent = re.search(r'\+\s*(\d+(?:\.\d+)?)\s*%\b', cleaned)
         plus_number  = re.search(r'\+\s*(\d+(?:\.\d+)?)\b(?!%)', cleaned)
+        current_raw_token = None
         if plus_percent:
             current_value = float(plus_percent.group(1))
             is_percent = True
+            current_raw_token = plus_percent.group(1)
         elif plus_number:
             if is_percent:
                 # Nếu đã xác định là phần trăm từ cặp (min%-max%) mà dấu % sau dấu + bị mất,
                 # vẫn đọc giá trị dạng số thực để so sánh chính xác A == C
                 current_value = float(plus_number.group(1))
+                current_raw_token = plus_number.group(1)
             else:
                 current_value = int(float(plus_number.group(1)))
         else:
@@ -1453,6 +1596,7 @@ class AutoRefineApp:
             if nums:
                 if is_percent:
                     current_value = float(nums[0])
+                    current_raw_token = nums[0]
                 else:
                     current_value = int(float(nums[0]))
             else:
@@ -1465,9 +1609,19 @@ class AutoRefineApp:
                 current_value = float(current_value)
             if isinstance(range_max, int):
                 range_max = float(range_max)
-            current_value = self.normalize_percent_value(current_value, range_max)
+            current_value = self.normalize_percent_value(
+                current_value,
+                range_max,
+                raw_token=current_raw_token,
+                reference_token=range_raw_token,
+            )
             if range_max is not None:
-                range_max = self.normalize_percent_value(range_max, current_value)
+                range_max = self.normalize_percent_value(
+                    range_max,
+                    current_value,
+                    raw_token=range_raw_token,
+                    reference_token=current_raw_token,
+                )
             # Sửa lỗi rơi dấu chấm nếu lệch xa max
             current_value = self.fix_percent_current_with_max(current_value, range_max)
         else:
@@ -1702,6 +1856,10 @@ class AutoRefineApp:
 
                 time.sleep(1.0) # Rút ngắn thời gian nghỉ giữa các chu kỳ để tăng tốc
             
+            except FailSafeException:
+                self.log("⛔ PyAutoGUI fail-safe được kích hoạt. Đang dừng luồng tự động để đảm bảo an toàn.")
+                self.is_running = False
+                break
             except Exception as e:
                 self.log(f"❌ Có lỗi xảy ra: {e}")
                 time.sleep(3) # Tăng thời gian nghỉ khi có lỗi
