@@ -895,18 +895,14 @@ class AutoRefineApp:
 
             time.sleep(0.8)
 
-            success_unlock = self.unlock_all_locks(max_attempts=6, force_click=True)
-            if not success_unlock:
-                if self.brute_force_unlock_locks(cycles=3):
-                    time.sleep(0.4)
-                    success_unlock = self.unlock_all_locks(max_attempts=4, force_click=True)
+            success_unlock = self.unlock_all_locks(max_attempts=1, force_click=True)
             if success_unlock:
                 self.locked_stats = [False] * 4
                 self.log("✅ Đã thăng cấp thành công và bỏ tích các dòng!")
                 return True
 
-            self.log("⚠️ Đã thăng cấp nhưng không bỏ tích hết các dòng, sẽ thử lại.")
-            time.sleep(0.8)
+            self.log("⚠️ Đã thăng cấp nhưng không bỏ tích hết các dòng, dừng thao tác để tránh lặp lại.")
+            return False
 
         self.log("❌ Thử thăng cấp nhiều lần nhưng chưa thành công hoàn toàn.")
         return False
@@ -1759,47 +1755,46 @@ class AutoRefineApp:
                         time.sleep(4.0) # Tăng thời gian chờ animation
 
                         # Bỏ tích và xác nhận bằng template: yêu cầu cả 4 ô là 'chưa tích'
-                        success_unlock = self.unlock_all_locks(max_attempts=6, force_click=True)
+                        success_unlock = self.unlock_all_locks(max_attempts=1, force_click=True)
                         if not success_unlock:
-                            if self.brute_force_unlock_locks(cycles=3):
-                                time.sleep(0.4)
-                                success_unlock = self.unlock_all_locks(max_attempts=4, force_click=True)
-                        self.locked_stats = [False] * 4
-
-                        # Sau khi bỏ tích bằng click, kiểm tra bằng template vài lần để chắc chắn
-                        check_rounds = 0
-                        all_ok = False
-                        used_template = (self._tpl_checked is not None) or (self._tpl_unchecked is not None)
-
-                        while check_rounds < 3 and success_unlock and used_template:
-                            tpl_status = self.all_locks_unchecked_by_template()
-                            if tpl_status is True:
-                                all_ok = True
-                                break
-                            if tpl_status is False:
-                                self.log("   ⏳ Template: phát hiện còn ô đang TÍCH, thử bỏ tích lại...")
-                                # Thử bỏ tích mạnh lại 1 vòng ngắn
-                                success_unlock = self.unlock_all_locks(max_attempts=3, force_click=True)
-                            else:
-                                self.log("   ⏳ Template: không đủ chắc chắn, sẽ kiểm tra lại sau 0.4s...")
-                            check_rounds += 1
-                            time.sleep(0.4)
-
-                        if success_unlock and not all_ok:
-                            self.log("   🔍 Bỏ qua kiểm tra template hoặc chưa đủ chắc chắn, chuyển sang kiểm tra fallback bằng màu sắc...")
-                            all_ok = self.verify_all_locks_unchecked()
-
-                        if success_unlock and all_ok:
-                            self.log("✅ Đã thăng cấp thành công và xác nhận 4 ô đều CHƯA TÍCH!")
-                            self.log("🔄 Tự động tiếp tục tẩy luyện với mục tiêu mới...")
-                            time.sleep(0.6)
-                        else:
-                            self.log(
-                                "⚠️ Không thể xác nhận 4 ô đều CHƯA TÍCH sau thăng cấp. Tránh tẩy luyện sai nên tool sẽ dừng để bạn kiểm tra lại."
-                            )
+                            self.log("⚠️ Không thể bỏ tích các ô sau thăng cấp. Tool sẽ dừng để tránh lặp lại thao tác.")
                             self.is_running = False
                             self.root.after(0, self._update_button_states)
                             time.sleep(1.0)
+                            continue
+
+                        self.locked_stats = [False] * 4
+
+                        all_ok = False
+                        used_template = (self._tpl_checked is not None) or (self._tpl_unchecked is not None)
+                        if used_template:
+                            tpl_status = self.all_locks_unchecked_by_template()
+                            if tpl_status is True:
+                                all_ok = True
+                            elif tpl_status is False:
+                                self.log("   ⚠️ Template phát hiện vẫn còn ô đang TÍCH. Dừng lại để bạn kiểm tra thủ công.")
+                                self.is_running = False
+                                self.root.after(0, self._update_button_states)
+                                time.sleep(1.0)
+                                continue
+
+                        if not all_ok:
+                            all_ok = self.verify_all_locks_unchecked(
+                                retries=1,
+                                delay=0.0,
+                                allow_bruteforce=False,
+                            )
+                            if not all_ok:
+                                self.log("   ⚠️ Không thể xác nhận 4 ô đều CHƯA TÍCH. Tool sẽ dừng để tránh thao tác sai.")
+                                self.is_running = False
+                                self.root.after(0, self._update_button_states)
+                                time.sleep(1.0)
+                                continue
+
+                        if all_ok:
+                            self.log("✅ Đã thăng cấp thành công và xác nhận 4 ô đều CHƯA TÍCH!")
+                            self.log("🔄 Tự động tiếp tục tẩy luyện với mục tiêu mới...")
+                            time.sleep(0.6)
                         continue
                     else:
                         self.log("⏳ Chưa thể hoàn tất thăng cấp, sẽ thử lại sau 1.0s.")
@@ -2145,7 +2140,12 @@ class AutoRefineApp:
             return True
         return None
 
-    def verify_all_locks_unchecked(self, retries: int = 2, delay: float = 0.4, allow_bruteforce: bool = True) -> bool:
+    def verify_all_locks_unchecked(
+        self,
+        retries: int = 1,
+        delay: float = 0.4,
+        allow_bruteforce: bool = False,
+    ) -> bool:
         """Kiểm tra lại trạng thái bỏ tích của các ô khóa bằng phân tích màu sắc.
 
         Hàm này dùng ``is_lock_checked`` để xác nhận thủ công trong trường hợp
@@ -2158,7 +2158,8 @@ class AutoRefineApp:
             return True
 
         still_checked: list[int] = []
-        for attempt in range(retries):
+        total_attempts = max(1, retries)
+        for attempt in range(total_attempts):
             still_checked = []
             for idx in indices:
                 lock_pos = self.config["stats"][idx].get("lock_button", [0, 0])
@@ -2176,29 +2177,18 @@ class AutoRefineApp:
                     self.log("   ✅ Fallback màu sắc: tất cả ô đang ở trạng thái bỏ tích.")
                 return True
 
-            if attempt < retries - 1:
+            if attempt < total_attempts - 1:
                 self.log(
                     "   ⏳ Fallback màu sắc: còn {} ô nghi ngờ đang TÍCH, chờ {:.1f}s rồi kiểm tra lại...".format(
                         len(still_checked), delay
                     )
                 )
-                time.sleep(delay)
-
-        if still_checked and allow_bruteforce:
-            self.log(
-                "   🔁 Fallback màu sắc: thử nhấp mạnh các ô khóa rồi kiểm tra lại..."
-            )
-            if self.brute_force_unlock_locks(cycles=3):
-                time.sleep(delay)
-                return self.verify_all_locks_unchecked(
-                    retries=retries,
-                    delay=delay,
-                    allow_bruteforce=False,
-                )
+                if delay > 0:
+                    time.sleep(delay)
 
         self.log(
             "   ⚠️ Fallback màu sắc: phát hiện {} ô vẫn đang TÍCH sau {} lần kiểm tra.".format(
-                len(still_checked), retries
+                len(still_checked), total_attempts
             )
         )
         return False
