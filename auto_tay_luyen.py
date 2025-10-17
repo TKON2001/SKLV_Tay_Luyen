@@ -1442,6 +1442,97 @@ class AutoRefineApp:
         self,
         value: float,
         reference: float | None = None,
+        raw_token: str | None = None,
+        reference_token: str | None = None,
+        *legacy_tokens: str,
+        **legacy_kwargs,
+    ) -> float:
+        """Chuẩn hoá giá trị % mà không làm mất 3 chữ số như 224%.
+
+        Nếu ``reference`` được cung cấp (thường là giá trị MAX hoặc CURRENT tương ứng),
+        ưu tiên chọn ứng viên gần ``reference`` nhất. Nếu không có ``reference``, chọn
+        ứng viên nằm trong khoảng [0, 400] với độ lớn lớn nhất để tránh rơi xuống 2 chữ số.
+        """
+
+        # --- Tương thích ngược ---
+        # Các phiên bản cũ có thể truyền đối số vị trí dư hoặc keyword lạ. Gom các giá trị này
+        # về ``raw_token``/``reference_token`` để tránh lỗi runtime và giữ nguyên logic mới.
+        if legacy_tokens:
+            extras = list(legacy_tokens)
+            if raw_token is None and extras:
+                raw_token = extras.pop(0)
+            if reference_token is None and extras:
+                reference_token = extras.pop(0)
+
+        legacy_raw = legacy_kwargs.pop("raw_token", None)
+        legacy_ref = legacy_kwargs.pop("reference_token", None)
+        if raw_token is None and legacy_raw not in (None, "", "-"):
+            raw_token = legacy_raw
+        if reference_token is None and legacy_ref not in (None, "", "-"):
+            reference_token = legacy_ref
+        # Bỏ qua mọi keyword không mong đợi khác.
+        legacy_kwargs.clear()
+
+        if raw_token is not None and not isinstance(raw_token, str):
+            raw_token = str(raw_token)
+        if reference_token is not None and not isinstance(reference_token, str):
+            reference_token = str(reference_token)
+
+        if raw_token in ("", "-"):
+            raw_token = None
+        if reference_token in ("", "-"):
+            reference_token = None
+
+        candidates = [value]
+        for div in (10.0, 100.0, 1000.0, 10000.0):
+            candidates.append(value / div)
+
+        if reference is not None:
+            best = min(candidates, key=lambda cand: abs(cand - reference))
+        else:
+            best = None
+
+            # Không có reference: chọn ứng viên trong khoảng hợp lý nhất (0..400)
+            plausible = [cand for cand in candidates if 0 <= cand <= 400]
+            if plausible:
+                best = max(plausible)
+
+        if best is None:
+            best = value
+
+        # Nếu OCR gốc có >=3 chữ số phần nguyên nhưng giá trị hiện tại <100, khôi phục bằng cách nhân 10.
+        integer_digits = self._count_integer_digits_from_token(raw_token)
+        if integer_digits and integer_digits >= 3 and abs(best) < 100:
+            adjusted = best
+            digits = integer_digits
+            while digits >= 3 and abs(adjusted) < 100:
+                adjusted *= 10.0
+                digits -= 1
+            best = adjusted
+
+        ref_digits = self._count_integer_digits_from_token(reference_token)
+        if reference is not None and ref_digits and ref_digits >= 3 and abs(reference) < 100:
+            adjusted_ref = reference
+            digits = ref_digits
+            while digits >= 3 and abs(adjusted_ref) < 100:
+                adjusted_ref *= 10.0
+                digits -= 1
+            # Giữ best gần reference đã điều chỉnh nếu cần
+            scale = adjusted_ref / reference if reference else 1.0
+            if scale not in (0.0, 1.0):
+                best *= scale
+
+        if best > 400:
+            best = 400.0
+        elif best < -400:
+            best = -400.0
+
+        return best
+
+    def normalize_percent_value(
+        self,
+        value: float,
+        reference: float | None = None,
         *legacy_tokens: str,
         raw_token: str | None = None,
         reference_token: str | None = None,
